@@ -7,9 +7,9 @@ import {
   getUsageInBody,
   isVarInLoopHead,
   wrapLoopBody,
-} from "./loop";
-import { validateUsage } from "./validation";
-import { annexB33FunctionsVisitor, isVarScope } from "./annex-B_3_3";
+} from "./loop.ts";
+import { validateUsage } from "./validation.ts";
+import { annexB33FunctionsVisitor, isVarScope } from "./annex-B_3_3.ts";
 
 export interface Options {
   tdz?: boolean;
@@ -17,7 +17,7 @@ export interface Options {
 }
 
 export default declare((api, opts: Options) => {
-  api.assertVersion(7);
+  api.assertVersion(REQUIRED_VERSION(7));
 
   const { throwIfClosureRequired = false, tdz: tdzEnabled = false } = opts;
   if (typeof throwIfClosureRequired !== "boolean") {
@@ -39,8 +39,8 @@ export default declare((api, opts: Options) => {
           const headPath = isForStatement
             ? path.get("init")
             : path.isForXStatement()
-            ? path.get("left")
-            : null;
+              ? path.get("left")
+              : null;
 
           let needsBodyWrap = false;
           const markNeedsBodyWrap = () => {
@@ -57,12 +57,11 @@ export default declare((api, opts: Options) => {
           let bodyScope: Scope | null;
           if (body.isBlockStatement()) {
             bodyScope = body.scope;
-
-            const bindings = getLoopBodyBindings(path);
-            for (const binding of bindings) {
-              const { capturedInClosure } = getUsageInBody(binding, path);
-              if (capturedInClosure) markNeedsBodyWrap();
-            }
+          }
+          const bindings = getLoopBodyBindings(path);
+          for (const binding of bindings) {
+            const { capturedInClosure } = getUsageInBody(binding, path);
+            if (capturedInClosure) markNeedsBodyWrap();
           }
 
           const captured: string[] = [];
@@ -84,10 +83,7 @@ export default declare((api, opts: Options) => {
               const { usages, capturedInClosure, hasConstantViolations } =
                 getUsageInBody(binding, path);
 
-              if (capturedInClosure) {
-                markNeedsBodyWrap();
-                captured.push(name);
-              } else if (
+              if (
                 headScope.parent.hasBinding(name) ||
                 headScope.parent.hasGlobal(name)
               ) {
@@ -98,6 +94,11 @@ export default declare((api, opts: Options) => {
                 const newName = headScope.generateUid(name);
                 headScope.rename(name, newName);
                 name = newName;
+              }
+
+              if (capturedInClosure) {
+                markNeedsBodyWrap();
+                captured.push(name);
               }
 
               if (isForStatement && hasConstantViolations) {

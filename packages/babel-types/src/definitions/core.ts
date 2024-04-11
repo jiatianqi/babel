@@ -1,7 +1,7 @@
-import is from "../validators/is";
-import isValidIdentifier from "../validators/isValidIdentifier";
+import is from "../validators/is.ts";
+import isValidIdentifier from "../validators/isValidIdentifier.ts";
 import { isKeyword, isReservedWord } from "@babel/helper-validator-identifier";
-import type * as t from "..";
+import type * as t from "../index.ts";
 import { readStringContents } from "@babel/helper-string-parser";
 
 import {
@@ -10,7 +10,7 @@ import {
   ASSIGNMENT_OPERATORS,
   UNARY_OPERATORS,
   UPDATE_OPERATORS,
-} from "../constants";
+} from "../constants/index.ts";
 
 import {
   defineAliasedType,
@@ -24,7 +24,7 @@ import {
   assertOneOf,
   validateOptional,
   type Validator,
-} from "./utils";
+} from "./utils.ts";
 
 const defineType = defineAliasedType("Standardized");
 
@@ -63,10 +63,11 @@ defineType("AssignmentExpression", {
     },
     left: {
       validate: !process.env.BABEL_TYPES_8_BREAKING
-        ? assertNodeType("LVal")
+        ? assertNodeType("LVal", "OptionalMemberExpression")
         : assertNodeType(
             "Identifier",
             "MemberExpression",
+            "OptionalMemberExpression",
             "ArrayPattern",
             "ObjectPattern",
             "TSAsExpression",
@@ -492,6 +493,10 @@ export const patternLikeCommon = () => ({
         ),
     optional: true,
   },
+  optional: {
+    validate: assertValueType("boolean"),
+    optional: true,
+  },
   decorators: {
     validate: chain(
       assertValueType("array"),
@@ -521,10 +526,6 @@ defineType("Identifier", {
           { type: "string" },
         ),
       ),
-    },
-    optional: {
-      validate: assertValueType("boolean"),
-      optional: true,
     },
   },
   validate(parent, key, node) {
@@ -611,7 +612,33 @@ defineType("NumericLiteral", {
   deprecatedAlias: "NumberLiteral",
   fields: {
     value: {
-      validate: assertValueType("number"),
+      validate: chain(
+        assertValueType("number"),
+        Object.assign(
+          function (node, key, val) {
+            if (1 / val < 0 || !Number.isFinite(val)) {
+              const error = new Error(
+                "NumericLiterals must be non-negative finite numbers. " +
+                  `You can use t.valueToNode(${val}) instead.`,
+              );
+              if (process.env.BABEL_8_BREAKING) {
+                // TODO(@nicolo-ribaudo) Fix regenerator to not pass negative
+                // numbers here.
+                if (!IS_STANDALONE) {
+                  if (!new Error().stack.includes("regenerator")) {
+                    throw error;
+                  }
+                }
+              } else {
+                // TODO: Enable this warning once regenerator is fixed.
+                // https://github.com/facebook/regenerator/pull/680
+                // console.warn(error);
+              }
+            }
+          } satisfies Validator,
+          { type: "number" },
+        ),
+      ),
     },
   },
   aliases: ["Expression", "Pureish", "Literal", "Immutable"],
@@ -729,9 +756,6 @@ defineType("Program", {
   visitor: ["directives", "body"],
   builder: ["body", "directives", "sourceType", "interpreter"],
   fields: {
-    sourceFile: {
-      validate: assertValueType("string"),
-    },
     sourceType: {
       validate: assertOneOf("script", "module"),
       default: "script",
@@ -968,11 +992,6 @@ defineType("RestElement", {
             "TSNonNullExpression",
           ),
     },
-    // For Flow
-    optional: {
-      validate: assertValueType("boolean"),
-      optional: true,
-    },
   },
   validate(parent: t.ArrayPattern | t.ObjectPattern, key) {
     if (!process.env.BABEL_TYPES_8_BREAKING) return;
@@ -1160,6 +1179,8 @@ defineType("VariableDeclaration", {
         "const",
         // https://github.com/tc39/proposal-explicit-resource-management
         "using",
+        // https://github.com/tc39/proposal-async-explicit-resource-management
+        "await using",
       ),
     },
     declarations: {
@@ -1285,18 +1306,6 @@ defineType("ArrayPattern", {
         assertEach(assertNodeOrValueType("null", "PatternLike", "LVal")),
       ),
     },
-    // For TypeScript
-    decorators: {
-      validate: chain(
-        assertValueType("array"),
-        assertEach(assertNodeType("Decorator")),
-      ),
-      optional: true,
-    },
-    optional: {
-      validate: assertValueType("boolean"),
-      optional: true,
-    },
   },
 });
 
@@ -1367,8 +1376,6 @@ defineType("ClassExpression", {
   fields: {
     id: {
       validate: assertNodeType("Identifier"),
-      // In declarations, this is missing if this is the
-      // child of an ExportDefaultDeclaration.
       optional: true,
     },
     typeParameters: {
@@ -1428,6 +1435,9 @@ defineType("ClassDeclaration", {
   fields: {
     id: {
       validate: assertNodeType("Identifier"),
+      // The id may be omitted if this is the child of an
+      // ExportDefaultDeclaration.
+      optional: true,
     },
     typeParameters: {
       validate: process.env.BABEL_8_BREAKING
@@ -1500,11 +1510,12 @@ defineType("ClassDeclaration", {
 });
 
 defineType("ExportAllDeclaration", {
-  visitor: ["source"],
+  builder: ["source"],
+  visitor: ["source", "attributes", "assertions"],
   aliases: [
     "Statement",
     "Declaration",
-    "ModuleDeclaration",
+    "ImportOrExportDeclaration",
     "ExportDeclaration",
   ],
   fields: {
@@ -1512,6 +1523,14 @@ defineType("ExportAllDeclaration", {
       validate: assertNodeType("StringLiteral"),
     },
     exportKind: validateOptional(assertOneOf("type", "value")),
+    attributes: {
+      optional: true,
+      validate: chain(
+        assertValueType("array"),
+        assertEach(assertNodeType("ImportAttribute")),
+      ),
+    },
+    // TODO(Babel 8): Deprecated
     assertions: {
       optional: true,
       validate: chain(
@@ -1527,7 +1546,7 @@ defineType("ExportDefaultDeclaration", {
   aliases: [
     "Statement",
     "Declaration",
-    "ModuleDeclaration",
+    "ImportOrExportDeclaration",
     "ExportDeclaration",
   ],
   fields: {
@@ -1544,11 +1563,12 @@ defineType("ExportDefaultDeclaration", {
 });
 
 defineType("ExportNamedDeclaration", {
-  visitor: ["declaration", "specifiers", "source"],
+  builder: ["declaration", "specifiers", "source"],
+  visitor: ["declaration", "specifiers", "source", "attributes", "assertions"],
   aliases: [
     "Statement",
     "Declaration",
-    "ModuleDeclaration",
+    "ImportOrExportDeclaration",
     "ExportDeclaration",
   ],
   fields: {
@@ -1583,6 +1603,14 @@ defineType("ExportNamedDeclaration", {
         },
       ),
     },
+    attributes: {
+      optional: true,
+      validate: chain(
+        assertValueType("array"),
+        assertEach(assertNodeType("ImportAttribute")),
+      ),
+    },
+    // TODO(Babel 8): Deprecated
     assertions: {
       optional: true,
       validate: chain(
@@ -1691,9 +1719,18 @@ defineType("ForOfStatement", {
 });
 
 defineType("ImportDeclaration", {
-  visitor: ["specifiers", "source"],
-  aliases: ["Statement", "Declaration", "ModuleDeclaration"],
+  builder: ["specifiers", "source"],
+  visitor: ["specifiers", "source", "attributes", "assertions"],
+  aliases: ["Statement", "Declaration", "ImportOrExportDeclaration"],
   fields: {
+    attributes: {
+      optional: true,
+      validate: chain(
+        assertValueType("array"),
+        assertEach(assertNodeType("ImportAttribute")),
+      ),
+    },
+    // TODO(Babel 8): Deprecated
     assertions: {
       optional: true,
       validate: chain(
@@ -1704,6 +1741,10 @@ defineType("ImportDeclaration", {
     module: {
       optional: true,
       validate: assertValueType("boolean"),
+    },
+    phase: {
+      default: null,
+      validate: assertOneOf("source", "defer"),
     },
     specifiers: {
       validate: chain(
@@ -1763,6 +1804,24 @@ defineType("ImportSpecifier", {
       // Handle Flowtype's extension "import {typeof foo} from"
       // And TypeScript's "import { type foo } from"
       validate: assertOneOf("type", "typeof", "value"),
+      optional: true,
+    },
+  },
+});
+
+defineType("ImportExpression", {
+  visitor: ["source", "options"],
+  aliases: ["Expression"],
+  fields: {
+    phase: {
+      default: null,
+      validate: assertOneOf("source", "defer"),
+    },
+    source: {
+      validate: assertNodeType("Expression"),
+    },
+    options: {
+      validate: assertNodeType("Expression"),
       optional: true,
     },
   },
@@ -1834,6 +1893,7 @@ export const classMethodOrPropertyCommon = () => ({
           "Identifier",
           "StringLiteral",
           "NumericLiteral",
+          "BigIntLiteral",
         );
         const computed = assertNodeType("Expression");
 

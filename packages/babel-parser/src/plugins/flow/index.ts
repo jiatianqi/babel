@@ -1,6 +1,6 @@
 /*:: declare var invariant; */
 
-import type Parser from "../../parser";
+import type Parser from "../../parser/index.ts";
 import {
   tokenIsIdentifier,
   tokenIsKeyword,
@@ -10,27 +10,18 @@ import {
   tt,
   type TokenType,
   tokenIsFlowInterfaceOrTypeOrOpaque,
-} from "../../tokenizer/types";
-import type * as N from "../../types";
-import type { Position } from "../../util/location";
-import { types as tc } from "../../tokenizer/context";
+} from "../../tokenizer/types.ts";
+import type * as N from "../../types.ts";
+import type { Position } from "../../util/location.ts";
+import { types as tc } from "../../tokenizer/context.ts";
 import * as charCodes from "charcodes";
-import { isIteratorStart } from "../../util/identifier";
-import FlowScopeHandler from "./scope";
-import {
-  BIND_LEXICAL,
-  BIND_VAR,
-  BIND_FUNCTION,
-  BIND_FLOW_DECLARE_FN,
-  SCOPE_ARROW,
-  SCOPE_FUNCTION,
-  SCOPE_OTHER,
-  type BindingTypes,
-} from "../../util/scopeflags";
-import type { ExpressionErrors } from "../../parser/util";
-import type { ParseStatementFlag } from "../../parser/statement";
-import { Errors, ParseErrorEnum } from "../../parse-error";
-import { cloneIdentifier, type Undone } from "../../parser/node";
+import { isIteratorStart } from "../../util/identifier.ts";
+import FlowScopeHandler from "./scope.ts";
+import { BindingFlag, ScopeFlag } from "../../util/scopeflags.ts";
+import type { ExpressionErrors } from "../../parser/util.ts";
+import type { ParseStatementFlag } from "../../parser/statement.ts";
+import { Errors, ParseErrorEnum } from "../../parse-error.ts";
+import { cloneIdentifier, type Undone } from "../../parser/node.ts";
 
 const reservedTypes = new Set([
   "_",
@@ -158,7 +149,7 @@ const FlowErrors = ParseErrorEnum`flow`({
     memberName: string;
   }) =>
     `Number enum members need to be initialized, e.g. \`${memberName} = 1\` in enum \`${enumName}\`.`,
-  EnumStringMemberInconsistentlyInitailized: ({
+  EnumStringMemberInconsistentlyInitialized: ({
     enumName,
   }: {
     enumName: string;
@@ -245,10 +236,6 @@ function isEsModuleType(bodyElement: N.Node): boolean {
 
 function hasTypeImportKind(node: N.Node): boolean {
   return node.importKind === "type" || node.importKind === "typeof";
-}
-
-function isMaybeDefaultImport(type: TokenType): boolean {
-  return tokenIsKeywordOrIdentifier(type) && type !== tt._from;
 }
 
 const exportSuggestions = {
@@ -338,7 +325,7 @@ export default (superClass: typeof Parser) =>
           this.flowPragma = null;
         }
       }
-      return super.finishToken(type, val);
+      super.finishToken(type, val);
     }
 
     addComment(comment: N.Comment): void {
@@ -355,7 +342,7 @@ export default (superClass: typeof Parser) =>
           throw new Error("Unexpected flow pragma");
         }
       }
-      return super.addComment(comment);
+      super.addComment(comment);
     }
 
     flowParseTypeInitialiser(tok?: TokenType): N.FlowType {
@@ -369,15 +356,13 @@ export default (superClass: typeof Parser) =>
     }
 
     flowParsePredicate(): N.FlowPredicate {
-      const node = this.startNode();
+      const node = this.startNode<N.FlowPredicate>();
       const moduloLoc = this.state.startLoc;
       this.next(); // eat `%`
       this.expectContextual(tt._checks);
       // Force '%' and 'checks' to be adjacent
-      if (this.state.lastTokStart > moduloLoc.index + 1) {
-        this.raise(FlowErrors.UnexpectedSpaceBetweenModuloChecks, {
-          at: moduloLoc,
-        });
+      if (this.state.lastTokStartLoc.index > moduloLoc.index + 1) {
+        this.raise(FlowErrors.UnexpectedSpaceBetweenModuloChecks, moduloLoc);
       }
       if (this.eat(tt.parenL)) {
         node.value = super.parseExpression();
@@ -425,7 +410,7 @@ export default (superClass: typeof Parser) =>
 
       const id = (node.id = this.parseIdentifier());
 
-      const typeNode = this.startNode();
+      const typeNode = this.startNode<N.FlowDeclareFunction>();
       const typeContainer = this.startNode<N.TypeAnnotation>();
 
       if (this.match(tt.lt)) {
@@ -456,7 +441,7 @@ export default (superClass: typeof Parser) =>
 
       this.scope.declareName(
         node.id.name,
-        BIND_FLOW_DECLARE_FN,
+        BindingFlag.TYPE_FLOW_DECLARE_FN,
         node.id.loc.start,
       );
 
@@ -478,9 +463,10 @@ export default (superClass: typeof Parser) =>
           return this.flowParseDeclareModuleExports(node);
         } else {
           if (insideModule) {
-            this.raise(FlowErrors.NestedDeclareModule, {
-              at: this.state.lastTokStartLoc,
-            });
+            this.raise(
+              FlowErrors.NestedDeclareModule,
+              this.state.lastTokStartLoc,
+            );
           }
           return this.flowParseDeclareModule(node);
         }
@@ -493,7 +479,7 @@ export default (superClass: typeof Parser) =>
       } else if (this.match(tt._export)) {
         return this.flowParseDeclareExportDeclaration(node, insideModule);
       } else {
-        throw this.unexpected();
+        this.unexpected();
       }
     }
 
@@ -504,7 +490,11 @@ export default (superClass: typeof Parser) =>
       node.id = this.flowParseTypeAnnotatableIdentifier(
         /*allowPrimitiveOverride*/ true,
       );
-      this.scope.declareName(node.id.name, BIND_VAR, node.id.loc.start);
+      this.scope.declareName(
+        node.id.name,
+        BindingFlag.TYPE_VAR,
+        node.id.loc.start,
+      );
       this.semicolon();
       return this.finishNode(node, "DeclareVariable");
     }
@@ -512,7 +502,7 @@ export default (superClass: typeof Parser) =>
     flowParseDeclareModule(
       node: Undone<N.FlowDeclareModule>,
     ): N.FlowDeclareModule {
-      this.scope.enter(SCOPE_OTHER);
+      this.scope.enter(ScopeFlag.OTHER);
 
       if (this.match(tt.string)) {
         node.id = super.parseExprAtom();
@@ -520,7 +510,7 @@ export default (superClass: typeof Parser) =>
         node.id = this.parseIdentifier();
       }
 
-      const bodyNode = (node.body = this.startNode());
+      const bodyNode = (node.body = this.startNode<N.BlockStatement>());
       // @ts-expect-error refine typings
       const body = (bodyNode.body = []);
       this.expect(tt.braceL);
@@ -530,9 +520,10 @@ export default (superClass: typeof Parser) =>
         if (this.match(tt._import)) {
           this.next();
           if (!this.isContextual(tt._type) && !this.match(tt._typeof)) {
-            this.raise(FlowErrors.InvalidNonTypeImportInDeclareModule, {
-              at: this.state.lastTokStartLoc,
-            });
+            this.raise(
+              FlowErrors.InvalidNonTypeImportInDeclareModule,
+              this.state.lastTokStartLoc,
+            );
           }
           super.parseImport(bodyNode);
         } else {
@@ -558,21 +549,15 @@ export default (superClass: typeof Parser) =>
       body.forEach(bodyElement => {
         if (isEsModuleType(bodyElement)) {
           if (kind === "CommonJS") {
-            this.raise(FlowErrors.AmbiguousDeclareModuleKind, {
-              at: bodyElement,
-            });
+            this.raise(FlowErrors.AmbiguousDeclareModuleKind, bodyElement);
           }
           kind = "ES";
         } else if (bodyElement.type === "DeclareModuleExports") {
           if (hasModuleExport) {
-            this.raise(FlowErrors.DuplicateDeclareModuleExports, {
-              at: bodyElement,
-            });
+            this.raise(FlowErrors.DuplicateDeclareModuleExports, bodyElement);
           }
           if (kind === "ES") {
-            this.raise(FlowErrors.AmbiguousDeclareModuleKind, {
-              at: bodyElement,
-            });
+            this.raise(FlowErrors.AmbiguousDeclareModuleKind, bodyElement);
           }
           kind = "CommonJS";
           hasModuleExport = true;
@@ -614,11 +599,14 @@ export default (superClass: typeof Parser) =>
             | "let"
             | "type"
             | "interface";
-          throw this.raise(FlowErrors.UnsupportedDeclareExportKind, {
-            at: this.state.startLoc,
-            unsupportedExportKind: label,
-            suggestion: exportSuggestions[label],
-          });
+          throw this.raise(
+            FlowErrors.UnsupportedDeclareExportKind,
+            this.state.startLoc,
+            {
+              unsupportedExportKind: label,
+              suggestion: exportSuggestions[label],
+            },
+          );
         }
 
         if (
@@ -654,7 +642,7 @@ export default (superClass: typeof Parser) =>
         }
       }
 
-      throw this.unexpected();
+      this.unexpected();
     }
 
     flowParseDeclareModuleExports(
@@ -692,16 +680,13 @@ export default (superClass: typeof Parser) =>
       node: Undone<N.FlowDeclareInterface>,
     ): N.FlowDeclareInterface {
       this.next();
-      this.flowParseInterfaceish(node);
+      this.flowParseInterfaceish(node, /* isClass */ false);
       return this.finishNode(node, "DeclareInterface");
     }
 
     // Interfaces
 
-    flowParseInterfaceish(
-      node: Undone<N.FlowDeclare>,
-      isClass: boolean = false,
-    ): void {
+    flowParseInterfaceish(node: Undone<N.FlowDeclare>, isClass: boolean): void {
       node.id = this.flowParseRestrictedIdentifier(
         /* liberal */ !isClass,
         /* declaration */ true,
@@ -709,7 +694,7 @@ export default (superClass: typeof Parser) =>
 
       this.scope.declareName(
         node.id.name,
-        isClass ? BIND_FUNCTION : BIND_LEXICAL,
+        isClass ? BindingFlag.TYPE_FUNCTION : BindingFlag.TYPE_LEXICAL,
         node.id.loc.start,
       );
 
@@ -720,8 +705,6 @@ export default (superClass: typeof Parser) =>
       }
 
       node.extends = [];
-      node.implements = [];
-      node.mixins = [];
 
       if (this.eat(tt._extends)) {
         do {
@@ -729,18 +712,21 @@ export default (superClass: typeof Parser) =>
         } while (!isClass && this.eat(tt.comma));
       }
 
-      if (this.isContextual(tt._mixins)) {
-        this.next();
-        do {
-          node.mixins.push(this.flowParseInterfaceExtends());
-        } while (this.eat(tt.comma));
-      }
+      if (isClass) {
+        node.implements = [];
+        node.mixins = [];
 
-      if (this.isContextual(tt._implements)) {
-        this.next();
-        do {
-          node.implements.push(this.flowParseInterfaceExtends());
-        } while (this.eat(tt.comma));
+        if (this.eatContextual(tt._mixins)) {
+          do {
+            node.mixins.push(this.flowParseInterfaceExtends());
+          } while (this.eat(tt.comma));
+        }
+
+        if (this.eatContextual(tt._implements)) {
+          do {
+            node.implements.push(this.flowParseInterfaceExtends());
+          } while (this.eat(tt.comma));
+        }
       }
 
       node.body = this.flowParseObjectType({
@@ -753,7 +739,7 @@ export default (superClass: typeof Parser) =>
     }
 
     flowParseInterfaceExtends(): N.FlowInterfaceExtends {
-      const node = this.startNode();
+      const node = this.startNode<N.FlowInterfaceExtends>();
 
       node.id = this.flowParseQualifiedTypeIdentifier();
       if (this.match(tt.lt)) {
@@ -766,15 +752,16 @@ export default (superClass: typeof Parser) =>
     }
 
     flowParseInterface(node: Undone<N.FlowInterface>): N.FlowInterface {
-      this.flowParseInterfaceish(node);
+      this.flowParseInterfaceish(node, /* isClass */ false);
       return this.finishNode(node, "InterfaceDeclaration");
     }
 
     checkNotUnderscore(word: string) {
       if (word === "_") {
-        this.raise(FlowErrors.UnexpectedReservedUnderscore, {
-          at: this.state.startLoc,
-        });
+        this.raise(
+          FlowErrors.UnexpectedReservedUnderscore,
+          this.state.startLoc,
+        );
       }
     }
 
@@ -785,8 +772,8 @@ export default (superClass: typeof Parser) =>
         declaration
           ? FlowErrors.AssignReservedType
           : FlowErrors.UnexpectedReservedType,
+        startLoc,
         {
-          at: startLoc,
           reservedType: word,
         },
       );
@@ -811,7 +798,11 @@ export default (superClass: typeof Parser) =>
         /* liberal */ false,
         /* declaration */ true,
       );
-      this.scope.declareName(node.id.name, BIND_LEXICAL, node.id.loc.start);
+      this.scope.declareName(
+        node.id.name,
+        BindingFlag.TYPE_LEXICAL,
+        node.id.loc.start,
+      );
 
       if (this.match(tt.lt)) {
         node.typeParameters = this.flowParseTypeParameterDeclaration();
@@ -834,7 +825,11 @@ export default (superClass: typeof Parser) =>
         /* liberal */ true,
         /* declaration */ true,
       );
-      this.scope.declareName(node.id.name, BIND_LEXICAL, node.id.loc.start);
+      this.scope.declareName(
+        node.id.name,
+        BindingFlag.TYPE_LEXICAL,
+        node.id.loc.start,
+      );
 
       if (this.match(tt.lt)) {
         node.typeParameters = this.flowParseTypeParameterDeclaration();
@@ -879,7 +874,7 @@ export default (superClass: typeof Parser) =>
         node.default = this.flowParseType();
       } else {
         if (requireDefault) {
-          this.raise(FlowErrors.MissingTypeParamDefault, { at: nodeStartLoc });
+          this.raise(FlowErrors.MissingTypeParamDefault, nodeStartLoc);
         }
       }
 
@@ -1105,7 +1100,7 @@ export default (superClass: typeof Parser) =>
       const oldInType = this.state.inType;
       this.state.inType = true;
 
-      const nodeStart = this.startNode();
+      const nodeStart = this.startNode<N.FlowObjectTypeAnnotation>();
 
       nodeStart.callProperties = [];
       nodeStart.properties = [];
@@ -1217,9 +1212,10 @@ export default (superClass: typeof Parser) =>
           !this.match(tt.braceR) &&
           !this.match(tt.braceBarR)
         ) {
-          this.raise(FlowErrors.UnexpectedExplicitInexactInObject, {
-            at: inexactStartLoc,
-          });
+          this.raise(
+            FlowErrors.UnexpectedExplicitInexactInObject,
+            inexactStartLoc,
+          );
         }
       }
 
@@ -1259,31 +1255,34 @@ export default (superClass: typeof Parser) =>
 
         if (isInexactToken) {
           if (!allowSpread) {
-            this.raise(FlowErrors.InexactInsideNonObject, {
-              at: this.state.lastTokStartLoc,
-            });
+            this.raise(
+              FlowErrors.InexactInsideNonObject,
+              this.state.lastTokStartLoc,
+            );
           } else if (!allowInexact) {
-            this.raise(FlowErrors.InexactInsideExact, {
-              at: this.state.lastTokStartLoc,
-            });
+            this.raise(
+              FlowErrors.InexactInsideExact,
+              this.state.lastTokStartLoc,
+            );
           }
           if (variance) {
-            this.raise(FlowErrors.InexactVariance, { at: variance });
+            this.raise(FlowErrors.InexactVariance, variance);
           }
 
           return null;
         }
 
         if (!allowSpread) {
-          this.raise(FlowErrors.UnexpectedSpreadType, {
-            at: this.state.lastTokStartLoc,
-          });
+          this.raise(
+            FlowErrors.UnexpectedSpreadType,
+            this.state.lastTokStartLoc,
+          );
         }
         if (protoStartLoc != null) {
           this.unexpected(protoStartLoc);
         }
         if (variance) {
-          this.raise(FlowErrors.SpreadVariance, { at: variance });
+          this.raise(FlowErrors.SpreadVariance, variance);
         }
 
         node.argument = this.flowParseType();
@@ -1318,9 +1317,10 @@ export default (superClass: typeof Parser) =>
             node.key.name === "constructor" &&
             node.value.this
           ) {
-            this.raise(FlowErrors.ThisParamBannedInConstructor, {
-              at: node.value.this,
-            });
+            this.raise(
+              FlowErrors.ThisParamBannedInConstructor,
+              node.value.this,
+            );
           }
         } else {
           if (kind !== "init") this.unexpected();
@@ -1356,7 +1356,7 @@ export default (superClass: typeof Parser) =>
           property.kind === "get"
             ? FlowErrors.GetterMayNotHaveThisParam
             : FlowErrors.SetterMayNotHaveThisParam,
-          { at: property.value.this },
+          property.value.this,
         );
       }
 
@@ -1365,12 +1365,12 @@ export default (superClass: typeof Parser) =>
           property.kind === "get"
             ? Errors.BadGetterArity
             : Errors.BadSetterArity,
-          { at: property },
+          property,
         );
       }
 
       if (property.kind === "set" && property.value.rest) {
-        this.raise(Errors.BadSetterRestParameter, { at: property });
+        this.raise(Errors.BadSetterRestParameter, property);
       }
     }
 
@@ -1407,7 +1407,7 @@ export default (superClass: typeof Parser) =>
       startLoc: Position,
       id: N.Identifier,
     ): N.FlowGenericTypeAnnotation {
-      const node = this.startNodeAt(startLoc);
+      const node = this.startNodeAt<N.FlowGenericTypeAnnotation>(startLoc);
 
       node.typeParameters = null;
       node.id = this.flowParseQualifiedTypeIdentifier(startLoc, id);
@@ -1420,14 +1420,14 @@ export default (superClass: typeof Parser) =>
     }
 
     flowParseTypeofType(): N.FlowTypeofTypeAnnotation {
-      const node = this.startNode();
+      const node = this.startNode<N.FlowTypeofTypeAnnotation>();
       this.expect(tt._typeof);
       node.argument = this.flowParsePrimaryType();
       return this.finishNode(node, "TypeofTypeAnnotation");
     }
 
     flowParseTupleType(): N.FlowTupleTypeAnnotation {
-      const node = this.startNode();
+      const node = this.startNode<N.FlowTupleTypeAnnotation>();
       node.types = [];
       this.expect(tt.bracketL);
       // We allow trailing commas
@@ -1450,13 +1450,13 @@ export default (superClass: typeof Parser) =>
 
       if (lh.type === tt.colon || lh.type === tt.question) {
         if (isThis && !first) {
-          this.raise(FlowErrors.ThisParamMustBeFirst, { at: node });
+          this.raise(FlowErrors.ThisParamMustBeFirst, node);
         }
         name = this.parseIdentifier(isThis);
         if (this.eat(tt.question)) {
           optional = true;
           if (isThis) {
-            this.raise(FlowErrors.ThisParamMayNotBeOptional, { at: node });
+            this.raise(FlowErrors.ThisParamMayNotBeOptional, node);
           }
         }
         typeAnnotation = this.flowParseTypeInitialiser();
@@ -1472,7 +1472,7 @@ export default (superClass: typeof Parser) =>
     reinterpretTypeAsFunctionTypeParam(
       type: N.FlowType,
     ): N.FlowFunctionTypeParam {
-      const node = this.startNodeAt(type.loc.start);
+      const node = this.startNodeAt<N.FlowFunctionTypeParam>(type.loc.start);
       node.name = null;
       node.optional = false;
       node.typeAnnotation = type;
@@ -1545,7 +1545,7 @@ export default (superClass: typeof Parser) =>
     // primitives with which other types are constructed.
     flowParsePrimaryType(): N.FlowTypeAnnotation {
       const startLoc = this.state.startLoc;
-      const node = this.startNode();
+      const node = this.startNode<N.FlowTypeAnnotation>();
       let tmp;
       let type;
       let isGroupedType = false;
@@ -1681,12 +1681,13 @@ export default (superClass: typeof Parser) =>
               );
             }
 
-            throw this.raise(FlowErrors.UnexpectedSubtractionOperand, {
-              at: this.state.startLoc,
-            });
+            throw this.raise(
+              FlowErrors.UnexpectedSubtractionOperand,
+              this.state.startLoc,
+            );
           }
-
-          throw this.unexpected();
+          this.unexpected();
+          return;
         case tt.num:
           return this.parseLiteral(
             this.state.value,
@@ -1736,7 +1737,7 @@ export default (superClass: typeof Parser) =>
           }
       }
 
-      throw this.unexpected();
+      this.unexpected();
     }
 
     flowParsePostfixType(): N.FlowTypeAnnotation {
@@ -1747,7 +1748,7 @@ export default (superClass: typeof Parser) =>
         (this.match(tt.bracketL) || this.match(tt.questionDot)) &&
         !this.canInsertSemicolon()
       ) {
-        const node = this.startNodeAt(startLoc);
+        const node = this.startNodeAt<N.FlowTypeAnnotation>(startLoc);
         const optional = this.eat(tt.questionDot);
         seenOptionalIndexedAccess = seenOptionalIndexedAccess || optional;
         this.expect(tt.bracketL);
@@ -1779,7 +1780,7 @@ export default (superClass: typeof Parser) =>
     }
 
     flowParsePrefixType(): N.FlowTypeAnnotation {
-      const node = this.startNode();
+      const node = this.startNode<N.FlowTypeAnnotation>();
       if (this.eat(tt.question)) {
         node.typeAnnotation = this.flowParsePrefixType();
         return this.finishNode(node, "NullableTypeAnnotation");
@@ -1792,7 +1793,9 @@ export default (superClass: typeof Parser) =>
       const param = this.flowParsePrefixType();
       if (!this.state.noAnonFunctionType && this.eat(tt.arrow)) {
         // TODO: This should be a type error. Passing in a SourceLocation, and it expects a Position.
-        const node = this.startNodeAt(param.loc.start);
+        const node = this.startNodeAt<N.FlowFunctionTypeAnnotation>(
+          param.loc.start,
+        );
         node.params = [this.reinterpretTypeAsFunctionTypeParam(param)];
         node.rest = null;
         node.this = null;
@@ -1804,7 +1807,7 @@ export default (superClass: typeof Parser) =>
     }
 
     flowParseIntersectionType(): N.FlowTypeAnnotation {
-      const node = this.startNode();
+      const node = this.startNode<N.FlowTypeAnnotation>();
       this.eat(tt.bitwiseAND);
       const type = this.flowParseAnonFunctionWithoutParens();
       node.types = [type];
@@ -1817,7 +1820,7 @@ export default (superClass: typeof Parser) =>
     }
 
     flowParseUnionType(): N.FlowTypeAnnotation {
-      const node = this.startNode();
+      const node = this.startNode<N.FlowTypeAnnotation>();
       this.eat(tt.bitwiseOR);
       const type = this.flowParseIntersectionType();
       node.types = [type];
@@ -1847,8 +1850,8 @@ export default (superClass: typeof Parser) =>
       }
     }
 
-    flowParseTypeAnnotation(): N.FlowTypeAnnotation {
-      const node = this.startNode<N.FlowTypeAnnotation>();
+    flowParseTypeAnnotation(): N.TypeAnnotation {
+      const node = this.startNode<N.TypeAnnotation>();
       node.typeAnnotation = this.flowParseTypeInitialiser();
       return this.finishNode(node, "TypeAnnotation");
     }
@@ -1860,7 +1863,6 @@ export default (superClass: typeof Parser) =>
         ? this.parseIdentifier()
         : this.flowParseRestrictedIdentifier();
       if (this.match(tt.colon)) {
-        // @ts-expect-error: refine typings
         ident.typeAnnotation = this.flowParseTypeAnnotation();
         this.resetEndLocation(ident);
       }
@@ -1900,12 +1902,13 @@ export default (superClass: typeof Parser) =>
       isMethod: boolean = false,
     ): void {
       if (allowExpressionBody) {
-        return this.forwardNoArrowParamsConversionAt(node, () =>
+        this.forwardNoArrowParamsConversionAt(node, () =>
           super.parseFunctionBody(node, true, isMethod),
         );
+        return;
       }
 
-      return super.parseFunctionBody(node, false, isMethod);
+      super.parseFunctionBody(node, false, isMethod);
     }
 
     parseFunctionBodyAndFinish<
@@ -2051,7 +2054,7 @@ export default (superClass: typeof Parser) =>
       this.expect(tt.question);
       const state = this.state.clone();
       const originalNoArrowAt = this.state.noArrowAt;
-      const node = this.startNodeAt(startLoc);
+      const node = this.startNodeAt<N.ConditionalExpression>(startLoc);
       let { consequent, failed } = this.tryParseConditionalConsequent();
       let [valid, invalid] = this.getArrowLikeExpressions(consequent);
 
@@ -2076,9 +2079,7 @@ export default (superClass: typeof Parser) =>
           // e.g.   Source: a ? (b): c => (d): e => f
           //      Result 1: a ? b : (c => ((d): e => f))
           //      Result 2: a ? ((b): c => d) : (e => f)
-          this.raise(FlowErrors.AmbiguousConditionalArrow, {
-            at: state.startLoc,
-          });
+          this.raise(FlowErrors.AmbiguousConditionalArrow, state.startLoc);
         }
 
         if (failed && valid.length === 1) {
@@ -2168,7 +2169,7 @@ export default (superClass: typeof Parser) =>
         /* isLHS */ false,
       );
       // Enter scope, as checkParams defines bindings
-      this.scope.enter(SCOPE_FUNCTION | SCOPE_ARROW);
+      this.scope.enter(ScopeFlag.FUNCTION | ScopeFlag.ARROW);
       // Use super's method to force the parameters to be checked
       super.checkParams(node, false, true);
       this.scope.exit();
@@ -2205,7 +2206,7 @@ export default (superClass: typeof Parser) =>
       }
 
       if (this.match(tt.colon)) {
-        const typeCastNode = this.startNodeAt(startLoc);
+        const typeCastNode = this.startNodeAt<N.TypeCastExpression>(startLoc);
         typeCastNode.expression = node;
         typeCastNode.typeAnnotation = this.flowParseTypeAnnotation();
 
@@ -2229,20 +2230,6 @@ export default (superClass: typeof Parser) =>
       }
 
       super.assertModuleNodeAllowed(node);
-    }
-
-    parseExport(
-      node: Undone<N.ExportNamedDeclaration | N.ExportAllDeclaration>,
-      decorators: N.Decorator[] | null,
-    ): N.AnyExport {
-      const decl = super.parseExport(node, decorators);
-      if (
-        decl.type === "ExportNamedDeclaration" ||
-        decl.type === "ExportAllDeclaration"
-      ) {
-        decl.exportKind = decl.exportKind || "value";
-      }
-      return decl;
     }
 
     parseExportDeclaration(
@@ -2347,11 +2334,9 @@ export default (superClass: typeof Parser) =>
           member.type !== "ClassPrivateProperty" &&
           member.type !== "PropertyDefinition" // Used by estree plugin
         ) {
-          this.raise(FlowErrors.DeclareClassElement, { at: startLoc });
+          this.raise(FlowErrors.DeclareClassElement, startLoc);
         } else if (member.value) {
-          this.raise(FlowErrors.DeclareClassFieldInitializer, {
-            at: member.value,
-          });
+          this.raise(FlowErrors.DeclareClassFieldInitializer, member.value);
         }
       }
     }
@@ -2366,8 +2351,7 @@ export default (superClass: typeof Parser) =>
 
       // Allow @@iterator and @@asyncIterator as a identifier only inside type
       if (!this.isIterator(word) || !this.state.inType) {
-        this.raise(Errors.InvalidIdentifier, {
-          at: this.state.curPosition(),
+        this.raise(Errors.InvalidIdentifier, this.state.curPosition(), {
           identifierName: fullWord,
         });
       }
@@ -2379,25 +2363,26 @@ export default (superClass: typeof Parser) =>
     getTokenFromCode(code: number): void {
       const next = this.input.charCodeAt(this.state.pos + 1);
       if (code === charCodes.leftCurlyBrace && next === charCodes.verticalBar) {
-        return this.finishOp(tt.braceBarL, 2);
+        this.finishOp(tt.braceBarL, 2);
       } else if (
         this.state.inType &&
         (code === charCodes.greaterThan || code === charCodes.lessThan)
       ) {
-        return this.finishOp(code === charCodes.greaterThan ? tt.gt : tt.lt, 1);
+        this.finishOp(code === charCodes.greaterThan ? tt.gt : tt.lt, 1);
       } else if (this.state.inType && code === charCodes.questionMark) {
         if (next === charCodes.dot) {
-          return this.finishOp(tt.questionDot, 2);
+          this.finishOp(tt.questionDot, 2);
+        } else {
+          // allow double nullable types in Flow: ??string
+          this.finishOp(tt.question, 1);
         }
-        // allow double nullable types in Flow: ??string
-        return this.finishOp(tt.question, 1);
       } else if (
         isIteratorStart(code, next, this.input.charCodeAt(this.state.pos + 2))
       ) {
         this.state.pos += 2; // eat "@@"
-        return this.readIterator();
+        this.readIterator();
       } else {
-        return super.getTokenFromCode(code);
+        super.getTokenFromCode(code);
       }
     }
 
@@ -2449,9 +2434,7 @@ export default (superClass: typeof Parser) =>
           !expr.extra?.parenthesized &&
           (exprList.length > 1 || !isParenthesizedExpr)
         ) {
-          this.raise(FlowErrors.TypeCastInPattern, {
-            at: expr.typeAnnotation,
-          });
+          this.raise(FlowErrors.TypeCastInPattern, expr.typeAnnotation);
         }
       }
 
@@ -2483,7 +2466,7 @@ export default (superClass: typeof Parser) =>
       return node;
     }
 
-    isValidLVal(type: string, isParenthesized: boolean, binding: BindingTypes) {
+    isValidLVal(type: string, isParenthesized: boolean, binding: BindingFlag) {
       return (
         type === "TypeCastExpression" ||
         super.isValidLVal(type, isParenthesized, binding)
@@ -2493,7 +2476,6 @@ export default (superClass: typeof Parser) =>
     // parse class property type annotations
     parseClassProperty(node: N.ClassProperty): N.ClassProperty {
       if (this.match(tt.colon)) {
-        // @ts-expect-error refine typings
         node.typeAnnotation = this.flowParseTypeAnnotation();
       }
       return super.parseClassProperty(node);
@@ -2503,7 +2485,6 @@ export default (superClass: typeof Parser) =>
       node: N.ClassPrivateProperty,
     ): N.ClassPrivateProperty {
       if (this.match(tt.colon)) {
-        // @ts-expect-error refine typings
         node.typeAnnotation = this.flowParseTypeAnnotation();
       }
       return super.parseClassPrivateProperty(node);
@@ -2552,7 +2533,7 @@ export default (superClass: typeof Parser) =>
       if (method.params && isConstructor) {
         const params = method.params;
         if (params.length > 0 && this.isThisParam(params[0])) {
-          this.raise(FlowErrors.ThisParamBannedInConstructor, { at: method });
+          this.raise(FlowErrors.ThisParamBannedInConstructor, method);
         }
         // estree support
       } else if (
@@ -2565,7 +2546,7 @@ export default (superClass: typeof Parser) =>
         // @ts-expect-error estree
         const params = method.value.params;
         if (params.length > 0 && this.isThisParam(params[0])) {
-          this.raise(FlowErrors.ThisParamBannedInConstructor, { at: method });
+          this.raise(FlowErrors.ThisParamBannedInConstructor, method);
         }
       }
     }
@@ -2597,7 +2578,7 @@ export default (superClass: typeof Parser) =>
         this.next();
         const implemented: N.FlowClassImplements[] = (node.implements = []);
         do {
-          const node = this.startNode();
+          const node = this.startNode<N.FlowClassImplements>();
           node.id = this.flowParseRestrictedIdentifier(/*liberal*/ true);
           if (this.match(tt.lt)) {
             node.typeParameters = this.flowParseTypeParameterInstantiation();
@@ -2615,9 +2596,9 @@ export default (superClass: typeof Parser) =>
       if (params.length > 0) {
         const param = params[0];
         if (this.isThisParam(param) && method.kind === "get") {
-          this.raise(FlowErrors.GetterMayNotHaveThisParam, { at: param });
+          this.raise(FlowErrors.GetterMayNotHaveThisParam, param);
         } else if (this.isThisParam(param)) {
-          this.raise(FlowErrors.SetterMayNotHaveThisParam, { at: param });
+          this.raise(FlowErrors.SetterMayNotHaveThisParam, param);
         }
       }
     }
@@ -2663,6 +2644,7 @@ export default (superClass: typeof Parser) =>
 
       // add typeParameters if we found them
       if (typeParameters) {
+        // @ts-expect-error: refine typings
         (result.value || result).typeParameters = typeParameters;
       }
       return result;
@@ -2671,23 +2653,22 @@ export default (superClass: typeof Parser) =>
     parseAssignableListItemTypes(param: N.Pattern): N.Pattern {
       if (this.eat(tt.question)) {
         if (param.type !== "Identifier") {
-          this.raise(FlowErrors.PatternIsOptional, { at: param });
+          this.raise(FlowErrors.PatternIsOptional, param);
         }
         if (this.isThisParam(param)) {
-          this.raise(FlowErrors.ThisParamMayNotBeOptional, { at: param });
+          this.raise(FlowErrors.ThisParamMayNotBeOptional, param);
         }
 
         (param as any as N.Identifier).optional = true;
       }
       if (this.match(tt.colon)) {
-        // @ts-expect-error: refine typings
         param.typeAnnotation = this.flowParseTypeAnnotation();
       } else if (this.isThisParam(param)) {
-        this.raise(FlowErrors.ThisParamAnnotationRequired, { at: param });
+        this.raise(FlowErrors.ThisParamAnnotationRequired, param);
       }
 
       if (this.match(tt.eq) && this.isThisParam(param)) {
-        this.raise(FlowErrors.ThisParamNoDefault, { at: param });
+        this.raise(FlowErrors.ThisParamNoDefault, param);
       }
 
       this.resetEndLocation(param);
@@ -2705,28 +2686,19 @@ export default (superClass: typeof Parser) =>
         node.typeAnnotation &&
         node.right.start < node.typeAnnotation.start
       ) {
-        this.raise(FlowErrors.TypeBeforeInitializer, {
-          at: node.typeAnnotation,
-        });
+        this.raise(FlowErrors.TypeBeforeInitializer, node.typeAnnotation);
       }
 
       return node;
     }
 
-    shouldParseDefaultImport(node: N.ImportDeclaration): boolean {
-      if (!hasTypeImportKind(node)) {
-        return super.shouldParseDefaultImport(node);
-      }
-
-      return isMaybeDefaultImport(this.state.type);
-    }
-
     checkImportReflection(node: Undone<N.ImportDeclaration>) {
       super.checkImportReflection(node);
       if (node.module && node.importKind !== "value") {
-        this.raise(FlowErrors.ImportReflectionHasImportType, {
-          at: node.specifiers[0].loc.start,
-        });
+        this.raise(
+          FlowErrors.ImportReflectionHasImportType,
+          node.specifiers[0].loc.start,
+        );
       }
     }
 
@@ -2746,37 +2718,35 @@ export default (superClass: typeof Parser) =>
       node.specifiers.push(this.finishImportSpecifier(specifier, type));
     }
 
-    // parse typeof and type imports
-    maybeParseDefaultImportSpecifier(node: N.ImportDeclaration): boolean {
-      node.importKind = "value";
-
-      let kind = null;
-      if (this.match(tt._typeof)) {
-        kind = "typeof" as const;
-      } else if (this.isContextual(tt._type)) {
-        kind = "type" as const;
+    isPotentialImportPhase(isExport: boolean): boolean {
+      if (super.isPotentialImportPhase(isExport)) return true;
+      if (this.isContextual(tt._type)) {
+        if (!isExport) return true;
+        const ch = this.lookaheadCharCode();
+        return ch === charCodes.leftCurlyBrace || ch === charCodes.asterisk;
       }
-      if (kind) {
-        const lh = this.lookahead();
-        const { type } = lh;
+      return !isExport && this.isContextual(tt._typeof);
+    }
 
-        // import type * is not allowed
-        if (kind === "type" && type === tt.star) {
-          // FIXME: lh.start?
-          this.unexpected(null, lh.type);
+    applyImportPhase(
+      node: Undone<N.ImportDeclaration | N.ExportNamedDeclaration>,
+      isExport: boolean,
+      phase: string | null,
+      loc?: Position,
+    ): void {
+      super.applyImportPhase(node, isExport, phase, loc);
+      if (isExport) {
+        if (!phase && this.match(tt._default)) {
+          // TODO: Align with our TS AST and always add .exportKind
+          return;
         }
-
-        if (
-          isMaybeDefaultImport(type) ||
-          type === tt.braceL ||
-          type === tt.star
-        ) {
-          this.next();
-          node.importKind = kind;
-        }
+        (node as N.ExportNamedDeclaration).exportKind =
+          phase === "type" ? phase : "value";
+      } else {
+        if (phase === "type" && this.match(tt.star)) this.unexpected();
+        (node as N.ImportDeclaration).importKind =
+          phase === "type" || phase === "typeof" ? phase : "value";
       }
-
-      return super.maybeParseDefaultImportSpecifier(node);
     }
 
     // parse import-type/typeof shorthand
@@ -2787,7 +2757,7 @@ export default (superClass: typeof Parser) =>
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
       isMaybeTypeOnly: boolean,
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      bindingType: BindingTypes | undefined,
+      bindingType: BindingFlag | undefined,
     ): N.ImportSpecifier {
       const firstIdent = specifier.imported;
 
@@ -2828,8 +2798,7 @@ export default (superClass: typeof Parser) =>
         } else {
           if (importedIsString) {
             /*:: invariant(firstIdent instanceof N.StringLiteral) */
-            throw this.raise(Errors.ImportBindingIsString, {
-              at: specifier,
+            throw this.raise(Errors.ImportBindingIsString, specifier, {
               importName: firstIdent.value,
             });
           }
@@ -2849,9 +2818,7 @@ export default (superClass: typeof Parser) =>
       const specifierIsTypeImport = hasTypeImportKind(specifier);
 
       if (isInTypeOnlyImport && specifierIsTypeImport) {
-        this.raise(FlowErrors.ImportTypeShorthandOnlyInPureImport, {
-          at: specifier,
-        });
+        this.raise(FlowErrors.ImportTypeShorthandOnlyInPureImport, specifier);
       }
 
       if (isInTypeOnlyImport || specifierIsTypeImport) {
@@ -2887,14 +2854,14 @@ export default (superClass: typeof Parser) =>
     // parse function type parameters - function foo<T>() {}
     parseFunctionParams(
       node: Undone<N.Function>,
-      allowModifiers?: boolean,
+      isConstructor: boolean,
     ): void {
       // @ts-expect-error kind may not index node
       const kind = node.kind;
       if (kind !== "get" && kind !== "set" && this.match(tt.lt)) {
         node.typeParameters = this.flowParseTypeParameterDeclaration();
       }
-      super.parseFunctionParams(node, allowModifiers);
+      super.parseFunctionParams(node, isConstructor);
     }
 
     // parse flow type annotations on variable declarator heads - let foo: string = bar
@@ -2904,7 +2871,6 @@ export default (superClass: typeof Parser) =>
     ): void {
       super.parseVarId(decl, kind);
       if (this.match(tt.colon)) {
-        // @ts-expect-error: refine typings
         decl.id.typeAnnotation = this.flowParseTypeAnnotation();
         this.resetEndLocation(decl.id); // set end position to end of type
       }
@@ -2918,7 +2884,6 @@ export default (superClass: typeof Parser) =>
       if (this.match(tt.colon)) {
         const oldNoAnonFunctionType = this.state.noAnonFunctionType;
         this.state.noAnonFunctionType = true;
-        // @ts-expect-error refine typings
         node.returnType = this.flowParseTypeAnnotation();
         this.state.noAnonFunctionType = oldNoAnonFunctionType;
       }
@@ -3032,7 +2997,7 @@ export default (superClass: typeof Parser) =>
               /*:: invariant(typeParameters) */
               this.raise(
                 FlowErrors.UnexpectedTypeParameterBeforeAsyncArrowFunction,
-                { at: typeParameters },
+                typeParameters,
               );
             }
             // @ts-expect-error: refine tryParse typings
@@ -3065,9 +3030,10 @@ export default (superClass: typeof Parser) =>
         if (arrow.thrown) throw arrow.error;
 
         /*:: invariant(typeParameters) */
-        throw this.raise(FlowErrors.UnexpectedTokenAfterTypeParameter, {
-          at: typeParameters,
-        });
+        throw this.raise(
+          FlowErrors.UnexpectedTokenAfterTypeParameter,
+          typeParameters,
+        );
       }
 
       return super.parseMaybeAssign(refExpressionErrors, afterLeftParse);
@@ -3145,11 +3111,11 @@ export default (superClass: typeof Parser) =>
       // ensure the `this` param is first, if it exists
       for (let i = 0; i < node.params.length; i++) {
         if (this.isThisParam(node.params[i]) && i > 0) {
-          this.raise(FlowErrors.ThisParamMustBeFirst, { at: node.params[i] });
+          this.raise(FlowErrors.ThisParamMustBeFirst, node.params[i]);
         }
       }
 
-      return super.checkParams(
+      super.checkParams(
         node,
         allowDuplicates,
         isArrowFunction,
@@ -3176,7 +3142,7 @@ export default (superClass: typeof Parser) =>
       ) {
         this.next();
 
-        const node = this.startNodeAt(startLoc);
+        const node = this.startNodeAt<N.CallExpression>(startLoc);
         node.callee = base;
         node.arguments = super.parseCallExpressionArguments(tt.parenR, false);
         base = this.finishNode(node, "CallExpression");
@@ -3291,7 +3257,7 @@ export default (superClass: typeof Parser) =>
       startLoc: Position,
     ): N.ArrowFunctionExpression | undefined | null {
       const node = this.startNodeAt<N.ArrowFunctionExpression>(startLoc);
-      this.parseFunctionParams(node);
+      this.parseFunctionParams(node, false);
       if (!this.parseArrow(node)) return;
       return super.parseArrowExpression(
         node,
@@ -3333,9 +3299,10 @@ export default (superClass: typeof Parser) =>
     parseTopLevel(file: N.File, program: N.Program): N.File {
       const fileNode = super.parseTopLevel(file, program);
       if (this.state.hasFlowComment) {
-        this.raise(FlowErrors.UnterminatedFlowComment, {
-          at: this.state.curPosition(),
-        });
+        this.raise(
+          FlowErrors.UnterminatedFlowComment,
+          this.state.curPosition(),
+        );
       }
       return fileNode;
     }
@@ -3343,9 +3310,7 @@ export default (superClass: typeof Parser) =>
     skipBlockComment(): N.CommentBlock | undefined {
       if (this.hasPlugin("flowComments") && this.skipFlowComment()) {
         if (this.state.hasFlowComment) {
-          throw this.raise(FlowErrors.NestedFlowComment, {
-            at: this.state.startLoc,
-          });
+          throw this.raise(FlowErrors.NestedFlowComment, this.state.startLoc);
         }
         this.hasFlowCommentCompletion();
         const commentSkip = this.skipFlowComment();
@@ -3394,9 +3359,7 @@ export default (superClass: typeof Parser) =>
     hasFlowCommentCompletion(): void {
       const end = this.input.indexOf("*/", this.state.pos);
       if (end === -1) {
-        throw this.raise(Errors.UnterminatedComment, {
-          at: this.state.curPosition(),
-        });
+        throw this.raise(Errors.UnterminatedComment, this.state.curPosition());
       }
     }
 
@@ -3412,8 +3375,7 @@ export default (superClass: typeof Parser) =>
         memberName: string;
       },
     ): void {
-      this.raise(FlowErrors.EnumBooleanMemberNotInitialized, {
-        at: loc,
+      this.raise(FlowErrors.EnumBooleanMemberNotInitialized, loc, {
         memberName,
         enumName,
       });
@@ -3427,44 +3389,34 @@ export default (superClass: typeof Parser) =>
         !enumContext.explicitType
           ? FlowErrors.EnumInvalidMemberInitializerUnknownType
           : enumContext.explicitType === "symbol"
-          ? FlowErrors.EnumInvalidMemberInitializerSymbolType
-          : FlowErrors.EnumInvalidMemberInitializerPrimaryType,
-        {
-          at: loc,
-          ...enumContext,
-        },
+            ? FlowErrors.EnumInvalidMemberInitializerSymbolType
+            : FlowErrors.EnumInvalidMemberInitializerPrimaryType,
+        loc,
+        enumContext,
       );
     }
 
     flowEnumErrorNumberMemberNotInitialized(
       loc: Position,
-      {
-        enumName,
-        memberName,
-      }: {
+      details: {
         enumName: string;
         memberName: string;
       },
     ): void {
-      this.raise(FlowErrors.EnumNumberMemberNotInitialized, {
-        at: loc,
-        enumName,
-        memberName,
-      });
+      this.raise(FlowErrors.EnumNumberMemberNotInitialized, loc, details);
     }
 
-    flowEnumErrorStringMemberInconsistentlyInitailized(
+    flowEnumErrorStringMemberInconsistentlyInitialized(
       node: N.Node,
-      {
-        enumName,
-      }: {
+      details: {
         enumName: string;
       },
     ): void {
-      this.raise(FlowErrors.EnumStringMemberInconsistentlyInitailized, {
-        at: node,
-        enumName,
-      });
+      this.raise(
+        FlowErrors.EnumStringMemberInconsistentlyInitialized,
+        node,
+        details,
+      );
     }
 
     flowEnumMemberInit(): EnumMemberInit {
@@ -3560,23 +3512,21 @@ export default (superClass: typeof Parser) =>
           hasUnknownMembers = true;
           break;
         }
-        const memberNode = this.startNode();
+        const memberNode = this.startNode<N.Node>();
         const { id, init } = this.flowEnumMemberRaw();
         const memberName = id.name;
         if (memberName === "") {
           continue;
         }
         if (/^[a-z]/.test(memberName)) {
-          this.raise(FlowErrors.EnumInvalidMemberName, {
-            at: id,
+          this.raise(FlowErrors.EnumInvalidMemberName, id, {
             memberName,
             suggestion: memberName[0].toUpperCase() + memberName.slice(1),
             enumName,
           });
         }
         if (seenNames.has(memberName)) {
-          this.raise(FlowErrors.EnumDuplicateMemberName, {
-            at: id,
+          this.raise(FlowErrors.EnumDuplicateMemberName, id, {
             memberName,
             enumName,
           });
@@ -3657,14 +3607,14 @@ export default (superClass: typeof Parser) =>
         return initializedMembers;
       } else if (defaultedMembers.length > initializedMembers.length) {
         for (const member of initializedMembers) {
-          this.flowEnumErrorStringMemberInconsistentlyInitailized(member, {
+          this.flowEnumErrorStringMemberInconsistentlyInitialized(member, {
             enumName,
           });
         }
         return defaultedMembers;
       } else {
         for (const member of defaultedMembers) {
-          this.flowEnumErrorStringMemberInconsistentlyInitailized(member, {
+          this.flowEnumErrorStringMemberInconsistentlyInitialized(member, {
             enumName,
           });
         }
@@ -3680,10 +3630,13 @@ export default (superClass: typeof Parser) =>
       if (!this.eatContextual(tt._of)) return null;
 
       if (!tokenIsIdentifier(this.state.type)) {
-        throw this.raise(FlowErrors.EnumInvalidExplicitTypeUnknownSupplied, {
-          at: this.state.startLoc,
-          enumName,
-        });
+        throw this.raise(
+          FlowErrors.EnumInvalidExplicitTypeUnknownSupplied,
+          this.state.startLoc,
+          {
+            enumName,
+          },
+        );
       }
 
       const { value } = this.state;
@@ -3695,8 +3648,7 @@ export default (superClass: typeof Parser) =>
         value !== "string" &&
         value !== "symbol"
       ) {
-        this.raise(FlowErrors.EnumInvalidExplicitType, {
-          at: this.state.startLoc,
+        this.raise(FlowErrors.EnumInvalidExplicitType, this.state.startLoc, {
           enumName,
           invalidEnumType: value,
         });
@@ -3785,8 +3737,7 @@ export default (superClass: typeof Parser) =>
             this.expect(tt.braceR);
             return this.finishNode(node, "EnumNumberBody");
           } else {
-            this.raise(FlowErrors.EnumInconsistentMemberValues, {
-              at: nameLoc,
+            this.raise(FlowErrors.EnumInconsistentMemberValues, nameLoc, {
               enumName,
             });
             return empty();

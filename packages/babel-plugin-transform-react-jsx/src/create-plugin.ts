@@ -72,14 +72,13 @@ export default function createPlugin({
 
       throwIfNamespace = true,
 
-      // TODO (Babel 8): It should throw if this option is used with the automatic runtime
       filter,
 
       runtime: RUNTIME_DEFAULT = process.env.BABEL_8_BREAKING
         ? "automatic"
         : development
-        ? "automatic"
-        : "classic",
+          ? "automatic"
+          : "classic",
 
       importSource: IMPORT_SOURCE_DEFAULT = DEFAULT.importSource,
       pragma: PRAGMA_DEFAULT = DEFAULT.pragma,
@@ -102,9 +101,15 @@ export default function createPlugin({
 {
   "plugins": [
     "@babel/plugin-transform-react-jsx"
-    ["@babel/plugin-proposal-object-rest-spread", { "loose": true, "useBuiltIns": ${useBuiltInsFormatted} }]
+    ["@babel/plugin-transform-object-rest-spread", { "loose": true, "useBuiltIns": ${useBuiltInsFormatted} }]
   ]
 }`,
+        );
+      }
+
+      if (filter != null && RUNTIME_DEFAULT === "automatic") {
+        throw new Error(
+          '@babel/plugin-transform-react-jsx: "filter" option can not be used with automatic runtime. If you are upgrading from Babel 7, please specify `runtime: "classic"`.',
         );
       }
     } else {
@@ -262,7 +267,7 @@ You can set \`throwIfNamespace: false\` to bypass this warning.`,
             }
           },
 
-          // TODO (Babel 8): Decide if this should be removed or brought back.
+          // TODO(Babel 8): Decide if this should be removed or brought back.
           // see: https://github.com/babel/babel/pull/12253#discussion_r513086528
           //
           // exit(path, state) {
@@ -341,7 +346,7 @@ You can set \`throwIfNamespace: false\` to bypass this warning.`,
           return !isDerivedClass(path.parentPath.parentPath as NodePath<Class>);
         }
         if (path.isTSModuleBlock()) {
-          // If the closeset parent is a TS Module block, `this` will not be allowed.
+          // If the closest parent is a TS Module block, `this` will not be allowed.
           return false;
         }
       } while ((scope = scope.parent));
@@ -763,10 +768,11 @@ You can set \`throwIfNamespace: false\` to bypass this warning.`,
       const found = Object.create(null);
 
       for (const attr of attribs) {
+        const { node } = attr;
         const name =
-          t.isJSXAttribute(attr) &&
-          t.isJSXIdentifier(attr.name) &&
-          attr.name.name;
+          t.isJSXAttribute(node) &&
+          t.isJSXIdentifier(node.name) &&
+          node.name.name;
 
         if (
           runtime === "automatic" &&
@@ -787,8 +793,8 @@ You can set \`throwIfNamespace: false\` to bypass this warning.`,
         !t.isObjectExpression(props[0].argument)
         ? props[0].argument
         : props.length > 0
-        ? t.objectExpression(props)
-        : t.nullLiteral();
+          ? t.objectExpression(props)
+          : t.nullLiteral();
     }
   });
 
@@ -848,7 +854,7 @@ function toMemberExpression(id: string): Identifier | MemberExpression {
       .split(".")
       .map(name => t.identifier(name))
       // @ts-expect-error - The Array#reduce does not have a signature
-      // where the type of initialial value differs from callback return type
+      // where the type of initial value differs from callback return type
       .reduce((object, property) => t.memberExpression(object, property))
   );
 }

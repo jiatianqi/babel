@@ -5,7 +5,6 @@
   /* left */ /* right */
   /* bottom */
 }
-
 {
   /* top */
   /* left */ /* right */

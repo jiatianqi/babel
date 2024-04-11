@@ -7,9 +7,19 @@ import {
   isStrictReservedWord,
   isKeyword,
 } from "@babel/helper-validator-identifier";
-import Chalk from "chalk";
 
-type ChalkClass = ReturnType<typeof getChalk>;
+import _colors, { createColors } from "picocolors";
+import type { Colors, Formatter } from "picocolors/types";
+// See https://github.com/alexeyraspopov/picocolors/issues/62
+const colors =
+  typeof process === "object" &&
+  (process.env.FORCE_COLOR === "0" || process.env.FORCE_COLOR === "false")
+    ? createColors(false)
+    : _colors;
+
+const compose: <T, U, V>(f: (gv: U) => V, g: (v: T) => U) => (v: T) => V =
+  (f, g) => v =>
+    f(g(v));
 
 /**
  * Names that are always allowed as identifiers, but also appear as keywords
@@ -38,19 +48,19 @@ type Token = {
   value: string;
 };
 /**
- * Chalk styles for token types.
+ * Styles for token types.
  */
-function getDefs(chalk: ChalkClass): Record<InternalTokenType, ChalkClass> {
+function getDefs(colors: Colors): Record<InternalTokenType, Formatter> {
   return {
-    keyword: chalk.cyan,
-    capitalized: chalk.yellow,
-    jsxIdentifier: chalk.yellow,
-    punctuator: chalk.yellow,
-    number: chalk.magenta,
-    string: chalk.green,
-    regex: chalk.magenta,
-    comment: chalk.grey,
-    invalid: chalk.white.bgRed.bold,
+    keyword: colors.cyan,
+    capitalized: colors.yellow,
+    jsxIdentifier: colors.yellow,
+    punctuator: colors.yellow,
+    number: colors.magenta,
+    string: colors.green,
+    regex: colors.magenta,
+    comment: colors.gray,
+    invalid: compose(compose(colors.white, colors.bgRed), colors.bold),
   };
 }
 
@@ -179,7 +189,7 @@ if (process.env.BABEL_8_BREAKING) {
 
       if (
         JSX_TAG.test(token.value) &&
-        (text[offset - 1] === "<" || text.slice(offset - 2, offset) == "</")
+        (text[offset - 1] === "<" || text.slice(offset - 2, offset) === "</")
       ) {
         return "jsxIdentifier";
       }
@@ -219,7 +229,7 @@ if (process.env.BABEL_8_BREAKING) {
 /**
  * Highlight `text` using the token definitions in `defs`.
  */
-function highlightTokens(defs: Record<string, ChalkClass>, text: string) {
+function highlightTokens(defs: Record<string, Formatter>, text: string) {
   let highlighted = "";
 
   for (const { type, value } of tokenize(text)) {
@@ -249,16 +259,16 @@ type Options = {
  * Whether the code should be highlighted given the passed options.
  */
 export function shouldHighlight(options: Options): boolean {
-  return !!Chalk.supportsColor || options.forceColor;
+  return colors.isColorSupported || options.forceColor;
 }
 
-/**
- * The Chalk instance that should be used given the passed options.
- */
-export function getChalk(options: Options) {
-  return options.forceColor
-    ? new Chalk.constructor({ enabled: true, level: 1 })
-    : Chalk;
+let pcWithForcedColor: Colors = undefined;
+function getColors(forceColor: boolean) {
+  if (forceColor) {
+    pcWithForcedColor ??= createColors(true);
+    return pcWithForcedColor;
+  }
+  return colors;
 }
 
 /**
@@ -266,10 +276,26 @@ export function getChalk(options: Options) {
  */
 export default function highlight(code: string, options: Options = {}): string {
   if (code !== "" && shouldHighlight(options)) {
-    const chalk = getChalk(options);
-    const defs = getDefs(chalk);
+    const defs = getDefs(getColors(options.forceColor));
     return highlightTokens(defs, code);
   } else {
     return code;
   }
+}
+
+if (!process.env.BABEL_8_BREAKING && !USE_ESM && !IS_STANDALONE) {
+  let chalk: any, chalkWithForcedColor: any;
+  // eslint-disable-next-line no-restricted-globals
+  exports.getChalk = ({ forceColor }: Options) => {
+    // eslint-disable-next-line no-restricted-globals
+    chalk ??= require("chalk");
+    if (forceColor) {
+      chalkWithForcedColor ??= new chalk.constructor({
+        enabled: true,
+        level: 1,
+      });
+      return chalkWithForcedColor;
+    }
+    return chalk;
+  };
 }

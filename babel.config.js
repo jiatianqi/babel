@@ -1,8 +1,20 @@
 "use strict";
 
+let jestSnapshot = false;
+if (typeof it === "function") {
+  // Jest loads the Babel config to parse file and update inline snapshots.
+  // This is ok, as it's not loading the Babel config to test Babel itself.
+  if (!new Error().stack.includes("jest-snapshot")) {
+    throw new Error("Monorepo root's babel.config.js loaded by a test.");
+  }
+  jestSnapshot = true;
+}
+
 const pathUtils = require("path");
 const fs = require("fs");
 const { parseSync } = require("@babel/core");
+const packageJson = require("./package.json");
+const babel7_8compat = require("./test/babel-7-8-compat/data.json");
 
 function normalize(src) {
   return src.replace(/\//, pathUtils.sep);
@@ -13,10 +25,10 @@ module.exports = function (api) {
 
   const outputType = api.cache.invalidate(() => {
     try {
-      return fs.readFileSync(__dirname + "/.module-type", "utf-8").trim();
-    } catch (_) {
-      return "script";
-    }
+      const type = fs.readFileSync(__dirname + "/.module-type", "utf-8").trim();
+      if (type === "module") return type;
+    } catch (_) {}
+    return "script";
   });
 
   const sources = ["packages/*/src", "codemods/*/src", "eslint/*/src"];
@@ -27,9 +39,17 @@ module.exports = function (api) {
     exclude: [
       "transform-typeof-symbol",
       // We need to enable useBuiltIns
-      "proposal-object-rest-spread",
+      "transform-object-rest-spread",
     ],
   };
+
+  const presetTsOpts = {
+    onlyRemoveTypeImports: true,
+    optimizeConstEnums: true,
+  };
+  if (api.version.startsWith("7") && !bool(process.env.BABEL_8_BREAKING)) {
+    presetTsOpts.allowDeclareFields = true;
+  }
 
   // These are "safe" assumptions, that we can enable globally
   const assumptions = {
@@ -61,15 +81,11 @@ module.exports = function (api) {
 
   let targets = {};
   let convertESM = outputType === "script";
-  /** @type {false | "externals" | "always"} */
-  let addImportExtension = convertESM ? false : "always";
+  let replaceTSImportExtension = true;
   let ignoreLib = true;
-  let includeRegeneratorRuntime = false;
   let needsPolyfillsForOldNode = false;
 
-  let transformRuntimeOptions;
-
-  const nodeVersion = bool(process.env.BABEL_8_BREAKING) ? "14.17" : "6.9";
+  const nodeVersion = bool(process.env.BABEL_8_BREAKING) ? "16.20" : "6.9";
   // The vast majority of our src files are modules, but we use
   // unambiguous to keep things simple until we get around to renaming
   // the modules to be more easily distinguished from CommonJS
@@ -89,9 +105,8 @@ module.exports = function (api) {
   switch (env) {
     // Configs used during bundling builds.
     case "standalone":
-      includeRegeneratorRuntime = true;
       convertESM = false;
-      addImportExtension = false;
+      replaceTSImportExtension = false;
       ignoreLib = false;
       // rollup-commonjs will converts node_modules to ESM
       unambiguousSources.push(
@@ -101,10 +116,11 @@ module.exports = function (api) {
         "packages/babel-runtime/regenerator"
       );
       targets = { ie: 7 };
+      needsPolyfillsForOldNode = true;
       break;
     case "rollup":
       convertESM = false;
-      addImportExtension = "externals";
+      replaceTSImportExtension = false;
       ignoreLib = false;
       // rollup-commonjs will converts node_modules to ESM
       unambiguousSources.push(
@@ -137,19 +153,11 @@ module.exports = function (api) {
     needsPolyfillsForOldNode = false;
   }
 
-  if (includeRegeneratorRuntime) {
-    const babelRuntimePkgPath = require.resolve("@babel/runtime/package.json");
-
-    transformRuntimeOptions = {
-      helpers: false, // Helpers are handled by rollup when needed
-      regenerator: true,
-      version: require(babelRuntimePkgPath).version,
-    };
-  }
-
   const config = {
     targets,
     assumptions,
+    babelrc: false,
+    browserslistConfigFile: false,
 
     // Our dependencies are all standard CommonJS, along with all sorts of
     // other random files in Babel's codebase, so we use script as the default,
@@ -166,27 +174,19 @@ module.exports = function (api) {
     ]
       .filter(Boolean)
       .map(normalize),
+    parserOpts: {
+      createImportExpressions: true,
+    },
     presets: [
       // presets are applied from right to left
       ["@babel/env", envOpts],
-      [
-        "@babel/preset-typescript",
-        {
-          onlyRemoveTypeImports: true,
-          allowDeclareFields: true,
-          optimizeConstEnums: true,
-        },
-      ],
+      ["@babel/preset-typescript", presetTsOpts],
     ],
     plugins: [
-      ["@babel/proposal-object-rest-spread", { useBuiltIns: true }],
+      ["@babel/transform-object-rest-spread", { useBuiltIns: true }],
 
-      convertESM ? "@babel/proposal-export-namespace-from" : null,
-      convertESM ? pluginImportMetaUrl : null,
-
-      pluginPackageJsonMacro,
-
-      needsPolyfillsForOldNode && pluginPolyfillsOldNode,
+      convertESM ? "@babel/transform-export-namespace-from" : null,
+      env !== "standalone" ? "@babel/plugin-proposal-json-modules" : null,
     ].filter(Boolean),
     overrides: [
       {
@@ -203,7 +203,7 @@ module.exports = function (api) {
       {
         test: [
           "packages/babel-generator",
-          "packages/babel-plugin-proposal-decorators",
+          "packages/babel-helper-create-class-features-plugin",
           "packages/babel-helper-string-parser",
         ].map(normalize),
         plugins: ["babel-plugin-transform-charcodes"],
@@ -215,21 +215,31 @@ module.exports = function (api) {
       convertESM && {
         test: ["./packages/babel-node/src"].map(normalize),
         // Used to conditionally import kexec
-        plugins: ["@babel/plugin-proposal-dynamic-import"],
+        plugins: ["@babel/plugin-transform-dynamic-import"],
       },
       {
         test: sources.map(normalize),
         assumptions: sourceAssumptions,
         plugins: [
           transformNamedBabelTypesImportToDestructuring,
-          addImportExtension
-            ? [pluginAddImportExtension, { when: addImportExtension }]
-            : null,
+          replaceTSImportExtension ? pluginReplaceTSImportExtension : null,
 
           [
             pluginToggleBooleanFlag,
             { name: "USE_ESM", value: outputType === "module" },
             "flag-USE_ESM",
+          ],
+          [
+            pluginToggleBooleanFlag,
+            { name: "IS_STANDALONE", value: env === "standalone" },
+            "flag-IS_STANDALONE",
+          ],
+          [
+            pluginToggleBooleanFlag,
+            {
+              name: "process.env.IS_PUBLISH",
+              value: bool(process.env.IS_PUBLISH),
+            },
           ],
 
           process.env.STRIP_BABEL_8_FLAG && [
@@ -240,6 +250,30 @@ module.exports = function (api) {
             },
             "flag-BABEL_8_BREAKING",
           ],
+
+          pluginPackageJsonMacro,
+
+          [
+            pluginRequiredVersionMacro,
+            {
+              allowAny: !process.env.IS_PUBLISH || env === "standalone",
+              overwrite(requiredVersion, filename) {
+                if (requiredVersion === 7) requiredVersion = "^7.0.0-0";
+                if (process.env.BABEL_8_BREAKING) {
+                  return packageJson.version;
+                }
+                const match = filename.match(/packages[\\/](.+?)[\\/]/);
+                if (
+                  match &&
+                  babel7_8compat["babel7plugins-babel8core"].includes(match[1])
+                ) {
+                  return `${requiredVersion} || >8.0.0-alpha <8.0.0-beta`;
+                }
+              },
+            },
+          ],
+
+          needsPolyfillsForOldNode && pluginPolyfillsOldNode,
         ].filter(Boolean),
       },
       convertESM && {
@@ -271,6 +305,12 @@ module.exports = function (api) {
           ],
         ],
       },
+      convertESM && {
+        exclude: [
+          "./packages/babel-core/src/config/files/import-meta-resolve.ts",
+        ].map(normalize),
+        plugins: [pluginImportMetaUrl],
+      },
       {
         test: sources.map(source => normalize(source.replace("/src", "/test"))),
         plugins: [
@@ -278,18 +318,25 @@ module.exports = function (api) {
             "@babel/transform-modules-commonjs",
             { importInterop: importInteropTest },
           ],
+          "@babel/plugin-transform-dynamic-import",
         ],
       },
       {
         test: unambiguousSources.map(normalize),
         sourceType: "unambiguous",
       },
-      includeRegeneratorRuntime && {
-        exclude: /regenerator-runtime/,
-        plugins: [["@babel/transform-runtime", transformRuntimeOptions]],
-      },
     ].filter(Boolean),
   };
+
+  if (jestSnapshot) {
+    config.plugins = [];
+    config.presets = [];
+    config.overrides = [];
+    config.parserOpts = {
+      plugins: ["typescript"],
+    };
+    config.sourceType = "unambiguous";
+  }
 
   return config;
 };
@@ -317,7 +364,7 @@ function importInteropSrc(source, filename) {
     return "node";
   }
   if (
-    source[0] === "." ||
+    (source[0] === "." && !source.endsWith(".cjs")) ||
     getMonorepoPackages().some(name => source.startsWith(name))
   ) {
     // We don't need to worry about interop for internal files, since we know
@@ -347,7 +394,7 @@ function importInteropTest(source) {
 
 // env vars from the cli are always strings, so !!ENV_VAR returns true for "false"
 function bool(value) {
-  return value && value !== "false" && value !== "0";
+  return Boolean(value) && value !== "false" && value !== "0";
 }
 
 // A minimum semver GTE implementation
@@ -364,7 +411,6 @@ function bool(value) {
 // copy and paste it.
 // `((v,w)=>(v=v.split("."),w=w.split("."),+v[0]>+w[0]||v[0]==w[0]&&+v[1]>=+w[1]))`;
 
-// TODO(Babel 8) This polyfills are only needed for Node.js 6 and 8
 /** @param {import("@babel/core")} api */
 function pluginPolyfillsOldNode({ template, types: t }) {
   const polyfills = [
@@ -441,6 +487,15 @@ function pluginPolyfillsOldNode({ template, types: t }) {
         process.allowedNodeEnvironmentFlags || require("node-environment-flags")
       `,
     },
+    {
+      name: "Object.hasOwn",
+      necessary: () => true,
+      supported: path =>
+        path.parentPath.isCallExpression({ callee: path.node }),
+      // Object.hasOwn has been introduced in Node.js 16.9.0
+      // https://github.com/nodejs/node/blob/main/doc/changelogs/CHANGELOG_V16.md#v8-93
+      replacement: template`hasOwnProperty.call`,
+    },
   ];
 
   return {
@@ -464,17 +519,77 @@ function pluginPolyfillsOldNode({ template, types: t }) {
     },
   };
 }
+
+/**
+ * @param {import("@babel/core")} pluginAPI
+ * @returns {import("@babel/core").PluginObj}
+ */
 function pluginToggleBooleanFlag({ types: t }, { name, value }) {
+  if (typeof value !== "boolean") throw new Error(`.value must be a boolean`);
+
+  function evaluate(test) {
+    const res = {
+      replace: replacement => ({ replacement, value: null, unrelated: false }),
+      value: value => ({ replacement: null, value, unrelated: false }),
+      unrelated: () => ({
+        replacement: test.node,
+        value: null,
+        unrelated: true,
+      }),
+    };
+
+    if (test.isIdentifier({ name }) || test.matchesPattern(name)) {
+      return res.value(value);
+    }
+
+    if (test.isUnaryExpression({ operator: "!" })) {
+      const arg = evaluate(test.get("argument"));
+      return arg.unrelated
+        ? res.unrelated()
+        : arg.replacement
+          ? res.replacement(t.unaryExpression("!", arg.replacement))
+          : res.value(!arg.value);
+    }
+
+    if (test.isLogicalExpression({ operator: "||" })) {
+      const left = evaluate(test.get("left"));
+      const right = evaluate(test.get("right"));
+
+      if (left.value === true || right.value === true) return res.value(true);
+      if (left.value === false && right.value === false) {
+        return res.value(false);
+      }
+      if (left.value === false) return res.replace(right.replacement);
+      if (right.value === false) return res.replace(left.replacement);
+      if (left.unrelated && right.unrelated) return res.unrelated();
+      return res.replace(
+        t.logicalExpression("||", left.replacement, right.replacement)
+      );
+    }
+
+    if (test.isLogicalExpression({ operator: "&&" })) {
+      const left = evaluate(test.get("left"));
+      const right = evaluate(test.get("right"));
+
+      if (left.value === true && right.value === true) return res.value(true);
+      if (left.value === false || right.value === false) {
+        return res.value(false);
+      }
+      if (left.value === true) return res.replace(right.replacement);
+      if (right.value === true) return res.replace(left.replacement);
+      if (left.unrelated && right.unrelated) return res.unrelated();
+      return res.replace(
+        t.logicalExpression("&&", left.replacement, right.replacement)
+      );
+    }
+
+    return res.unrelated();
+  }
+
   return {
     visitor: {
       "IfStatement|ConditionalExpression"(path) {
         let test = path.get("test");
-        let keepConsequent = value;
-
-        if (test.isUnaryExpression({ operator: "!" })) {
-          test = test.get("argument");
-          keepConsequent = !keepConsequent;
-        }
 
         // yarn-plugin-conditions injects bool(process.env.BABEL_8_BREAKING)
         // tests, to properly cast the env variable to a boolean.
@@ -486,13 +601,27 @@ function pluginToggleBooleanFlag({ types: t }, { name, value }) {
           test = test.get("arguments")[0];
         }
 
-        if (!test.isIdentifier({ name }) && !test.matchesPattern(name)) return;
+        const res = evaluate(test);
 
-        path.replaceWith(
-          keepConsequent
-            ? path.node.consequent
-            : path.node.alternate || t.emptyStatement()
-        );
+        if (res.unrelated) return;
+        if (res.replacement) {
+          path.get("test").replaceWith(res.replacement);
+        } else {
+          path.replaceWith(
+            res.value
+              ? path.node.consequent
+              : path.node.alternate || t.emptyStatement()
+          );
+        }
+      },
+      LogicalExpression(path) {
+        const res = evaluate(path.get("test"));
+        if (res.unrelated) return;
+        if (res.replacement) {
+          path.get("test").replaceWith(res.replacement);
+        } else {
+          path.replaceWith(t.booleanLiteral(res.value));
+        }
       },
       MemberExpression(path) {
         if (path.matchesPattern(name)) {
@@ -554,6 +683,51 @@ function pluginPackageJsonMacro({ types: t }) {
   };
 }
 
+function pluginRequiredVersionMacro({ types: t }, { allowAny, overwrite }) {
+  const fnName = "REQUIRED_VERSION";
+
+  return {
+    visitor: {
+      ReferencedIdentifier(path) {
+        if (path.isIdentifier({ name: fnName })) {
+          throw path.buildCodeFrameError(
+            `"${fnName}" is only supported in call expressions.`
+          );
+        }
+      },
+      CallExpression(path) {
+        if (!path.get("callee").isIdentifier({ name: fnName })) return;
+
+        if (path.node.arguments.length !== 1) {
+          throw path.buildCodeFrameError(
+            `"${fnName}" expects exactly one argument.`
+          );
+        }
+
+        const arg = path.get("arguments.0").evaluate().value;
+        if (!arg) {
+          throw path.buildCodeFrameError(
+            `"${fnName}" expects a literal argument.`
+          );
+        }
+
+        if (allowAny) {
+          path.replaceWith(t.stringLiteral("*"));
+          return;
+        }
+
+        const version = overwrite(arg, this.filename);
+        if (version != null) {
+          path.replaceWith(t.stringLiteral(version));
+          return;
+        }
+
+        path.replaceWith(path.node.arguments[0]);
+      },
+    },
+  };
+}
+
 // transform `import { x } from "@babel/types"` to `import * as _t from "@babel/types"; const { x } = _t;
 function transformNamedBabelTypesImportToDestructuring({
   types: {
@@ -602,6 +776,10 @@ function transformNamedBabelTypesImportToDestructuring({
   };
 }
 
+/**
+ * @param {import("@babel/core")} pluginAPI
+ * @returns {import("@babel/core").PluginObj}
+ */
 function pluginImportMetaUrl({ types: t, template }) {
   const isImportMeta = node =>
     t.isMetaProperty(node) &&
@@ -616,31 +794,59 @@ function pluginImportMetaUrl({ types: t, template }) {
   return {
     visitor: {
       Program(programPath) {
-        // We must be sure to run this before the instanbul plugins, because its
+        // We must be sure to run this before the istanbul plugins, because its
         // instrumentation breaks our detection.
         programPath.traverse({
-          // fileURLToPath(import.meta.url)
           CallExpression(path) {
             const { node } = path;
 
+            // fileURLToPath(import.meta.url)
             if (
-              !t.isIdentifier(node.callee, { name: "fileURLToPath" }) ||
+              (function () {
+                if (
+                  !t.isIdentifier(node.callee, {
+                    name: "fileURLToPath",
+                  }) ||
+                  node.arguments.length !== 1
+                ) {
+                  return;
+                }
+
+                const arg = node.arguments[0];
+
+                if (
+                  !t.isMemberExpression(arg, {
+                    computed: false,
+                  }) ||
+                  !t.isIdentifier(arg.property, {
+                    name: "url",
+                  }) ||
+                  !isImportMeta(arg.object)
+                ) {
+                  return;
+                }
+                path.replaceWith(t.identifier("__filename"));
+                return true;
+              })()
+            ) {
+              return;
+            }
+
+            // const { __dirname: cwd } = commonJS(import.meta.url)
+            if (
+              !t.isIdentifier(node.callee, { name: "commonJS" }) ||
               node.arguments.length !== 1
             ) {
               return;
             }
 
-            const arg = node.arguments[0];
+            const binding = path.scope.getBinding("commonJS");
+            if (!binding) return;
 
-            if (
-              !t.isMemberExpression(arg, { computed: false }) ||
-              !t.isIdentifier(arg.property, { name: "url" }) ||
-              !isImportMeta(arg.object)
-            ) {
-              return;
+            if (binding.path.isImportSpecifier()) {
+              path.parentPath.parentPath.assertVariableDeclaration();
+              path.parentPath.parentPath.remove();
             }
-
-            path.replaceWith(t.identifier("__filename"));
           },
 
           // const require = createRequire(import.meta.url)
@@ -682,57 +888,18 @@ function pluginImportMetaUrl({ types: t, template }) {
   };
 }
 
-function pluginAddImportExtension(api, { when }) {
+function pluginReplaceTSImportExtension() {
   return {
     visitor: {
       "ImportDeclaration|ExportDeclaration"({ node }) {
         const { source } = node;
-        if (!source) return;
-
-        if (
-          when === "always" &&
-          source.value.startsWith(".") &&
-          !/\.[a-z]+$/.test(source.value)
-        ) {
-          const dir = pathUtils.dirname(this.filename);
-
-          try {
-            const pkg = JSON.parse(
-              fs.readFileSync(
-                pathUtils.join(dir, `${source.value}/package.json`)
-              ),
-              "utf8"
-            );
-
-            if (pkg.main) source.value = pathUtils.join(source.value, pkg.main);
-          } catch (_) {}
-
-          try {
-            if (fs.statSync(pathUtils.join(dir, source.value)).isFile()) return;
-          } catch (_) {}
-
-          for (const [src, lib = src] of [["ts", "js"], ["js"], ["cjs"]]) {
-            try {
-              fs.statSync(pathUtils.join(dir, `${source.value}.${src}`));
-              source.value += `.${lib}`;
-              return;
-            } catch (_) {}
-          }
-
-          source.value += "/index.js";
+        if (source) {
+          source.value = source.value.replace(/(\.[mc]?)ts$/, "$1js");
         }
-        if (
-          source.value.startsWith("lodash/") ||
-          source.value.startsWith("core-js-compat/") ||
-          source.value === "core-js/stable/index" ||
-          source.value === "regenerator-runtime/runtime" ||
-          source.value === "babel-plugin-dynamic-import-node/utils"
-        ) {
-          source.value += ".js";
-        }
-        if (source.value.startsWith("@babel/preset-modules/")) {
-          source.value += "/index.js";
-        }
+      },
+      TSImportEqualsDeclaration({ node }) {
+        const { expression } = node.moduleReference;
+        expression.value = expression.value.replace(/(\.[mc]?)ts$/, "$1js");
       },
     },
   };
@@ -783,6 +950,7 @@ function getTokenTypesMapping() {
 function pluginBabelParserTokenType({
   types: { isIdentifier, numericLiteral },
 }) {
+  const tokenTypesMapping = getTokenTypesMapping();
   return {
     visitor: {
       MemberExpression(path) {
@@ -793,7 +961,7 @@ function pluginBabelParserTokenType({
           !node.computed
         ) {
           const tokenName = node.property.name;
-          const tokenType = getTokenTypesMapping().get(node.property.name);
+          const tokenType = tokenTypesMapping.get(node.property.name);
           if (tokenType === undefined) {
             throw path.buildCodeFrameError(
               `${tokenName} is not defined in ${tokenTypeSourcePath}`
@@ -868,7 +1036,7 @@ function pluginGeneratorOptimization({ types: t }) {
               t.isStringLiteral(args[0])
             ) {
               const str = args[0].value;
-              if (str.length == 1) {
+              if (str.length === 1) {
                 node.callee.property.name = "tokenChar";
                 args[0] = t.numericLiteral(str.charCodeAt(0));
               }

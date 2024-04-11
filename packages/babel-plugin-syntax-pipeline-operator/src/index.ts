@@ -6,12 +6,12 @@ const documentationURL =
   "https://babeljs.io/docs/en/babel-plugin-proposal-pipeline-operator";
 
 export interface Options {
-  proposal: typeof PIPELINE_PROPOSALS[number];
-  topicToken?: typeof TOPIC_TOKENS[number];
+  proposal: (typeof PIPELINE_PROPOSALS)[number];
+  topicToken?: (typeof TOPIC_TOKENS)[number];
 }
 
 export default declare((api, { proposal, topicToken }: Options) => {
-  api.assertVersion(7);
+  api.assertVersion(REQUIRED_VERSION(7));
 
   if (typeof proposal !== "string" || !PIPELINE_PROPOSALS.includes(proposal)) {
     const proposalList = PIPELINE_PROPOSALS.map(p => `"${p}"`).join(", ");

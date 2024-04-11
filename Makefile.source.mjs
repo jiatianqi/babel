@@ -1,7 +1,8 @@
 import "shelljs/make.js";
 import path from "path";
 import { execFileSync } from "child_process";
-import { writeFileSync } from "fs";
+import { readFileSync, writeFileSync, readdirSync, existsSync } from "fs";
+import semver from "semver";
 
 /**
  * @type {import("shelljs")}
@@ -28,8 +29,6 @@ const EslintArgs = [
   "*.{js,cjs,mjs,ts}",
   "--format",
   "codeframe",
-  "--ext",
-  ".js,.cjs,.mjs,.ts",
 ];
 
 const YARN_PATH = shell.which("yarn").stdout;
@@ -55,7 +54,7 @@ function exec(executable, args, cwd, inheritStdio = true) {
       env: process.env,
     });
   } catch (error) {
-    if (inheritStdio && error.status != 0) {
+    if (inheritStdio && error.status !== 0) {
       console.error(
         new Error(
           `\ncommand: ${executable} ${args.join(" ")}\ncode: ${error.status}`
@@ -88,7 +87,7 @@ function env(fun, env) {
  */
 
 target["clean-all"] = function () {
-  shell.rm("-rf", ["node_modules", "package-lock.json", ".changelog"]);
+  shell.rm("-rf", ["package-lock.json", ".changelog"]);
 
   SOURCES.forEach(source => {
     shell.rm("-rf", `${source}/*/test/tmp`);
@@ -97,6 +96,14 @@ target["clean-all"] = function () {
 
   target["clean"]();
   target["clean-lib"]();
+  target["clean-node-modules"]();
+};
+
+target["clean-node-modules"] = function () {
+  shell.rm("-rf", "node_modules");
+  SOURCES.forEach(source => {
+    shell.rm("-rf", `${source}/*/node_modules`);
+  });
 };
 
 target["clean"] = function () {
@@ -122,6 +129,9 @@ target["clean-lib"] = function () {
     "-rf",
     SOURCES.map(source => `${source}/*/lib`)
   );
+
+  // re-generate the necessary lib/package.json files
+  node(["scripts/set-module-type.js"]);
 };
 
 target["clean-runtime-helpers"] = function () {
@@ -133,6 +143,8 @@ target["clean-runtime-helpers"] = function () {
     "packages/babel-runtime-corejs2/helpers/**/*.mjs",
     "packages/babel-runtime-corejs3/helpers/**/*.mjs",
     "packages/babel-runtime-corejs2/core-js",
+    "packages/babel-runtime-corejs3/core-js",
+    "packages/babel-runtime-corejs3/core-js-stable",
   ]);
 };
 
@@ -141,7 +153,7 @@ target["clean-runtime-helpers"] = function () {
  */
 
 target["use-cjs"] = function () {
-  node(["scripts/set-module-type.js", "script"]);
+  node(["scripts/set-module-type.js", "commonjs"]);
 
   target["bootstrap"]();
 };
@@ -168,7 +180,7 @@ target["bootstrap"] = function () {
 target["build"] = function () {
   target["build-no-bundle"]();
 
-  if (process.env.BABEL_COVERAGE != "true") {
+  if (process.env.BABEL_COVERAGE !== "true") {
     target["build-standalone"]();
   }
 };
@@ -185,7 +197,6 @@ target["build-bundle"] = function () {
 
   yarn(["gulp", "build"]);
 
-  target["build-flow-typings"]();
   target["build-dist"]();
 };
 
@@ -202,7 +213,6 @@ target["build-no-bundle"] = function () {
     { BABEL_ENV: "development" }
   );
 
-  target["build-flow-typings"]();
   target["build-dist"]();
 };
 
@@ -222,6 +232,12 @@ target["build-plugin-transform-runtime-dist"] = function () {
 };
 
 target["prepublish"] = function () {
+  if (process.env.BABEL_8_BREAKING) {
+    node(["scripts/set-module-type.js", "module"]);
+  } else {
+    node(["scripts/set-module-type.js", "commonjs"]);
+  }
+
   target["bootstrap-only"]();
 
   env(
@@ -257,6 +273,7 @@ target["prepublish-build"] = function () {
       target["prepublish-build-standalone"]();
       target["clone-license"]();
       target["prepublish-prepare-dts"]();
+      target["build-flow-typings"]();
     },
     {
       NODE_ENV: "production",
@@ -389,6 +406,54 @@ target["test-cov"] = function () {
   );
 };
 
+function bootstrapParserTests(name, repoURL, subPaths) {
+  function getParserTestsCommit(id) {
+    const content = readFileSync("./Makefile", "utf8");
+    const commit = content.match(new RegExp(`${id}_COMMIT = (\\w{40})`))[1];
+    if (!commit) throw new Error(`Could not find ${id}_COMMIT in Makefile`);
+    return commit;
+  }
+
+  const dir = "./build/" + name.toLowerCase();
+
+  shell.rm("-rf", dir);
+  shell.mkdir("-p", "build");
+
+  exec("git", [
+    "clone",
+    "--filter=blob:none",
+    "--sparse",
+    "--single-branch",
+    "--shallow-since='2 years ago'",
+    repoURL,
+    dir,
+  ]);
+
+  exec("git", ["sparse-checkout", "set", ...subPaths], dir);
+  exec("git", ["checkout", "-q", getParserTestsCommit(name)], dir);
+}
+
+target["bootstrap-test262"] = function () {
+  bootstrapParserTests("TEST262", "https://github.com/tc39/test262.git", [
+    "test",
+    "harness",
+  ]);
+};
+
+target["bootstrap-typescript"] = function () {
+  bootstrapParserTests(
+    "TYPESCRIPT",
+    "https://github.com/microsoft/TypeScript.git",
+    ["tests"]
+  );
+};
+
+target["bootstrap-flow"] = function () {
+  bootstrapParserTests("FLOW", "https://github.com/facebook/flow.git", [
+    "src/parser/test/flow",
+  ]);
+};
+
 /**
  * PUBLISH
  */
@@ -401,8 +466,8 @@ target["new-version-checklist"] = function () {
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 !!!!!!                                                   !!!!!!
-!!!!!!         Write any message that should             !!!!!!
-!!!!!!            block the release here                 !!!!!!
+!!!!!! Write any important message here, and change the  !!!!!!
+!!!!!! if (0) above to if (1)                            !!!!!!
 !!!!!!                                                   !!!!!!
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
@@ -420,9 +485,76 @@ target["new-version"] = function () {
   yarn(["release-tool", "version", "-f", "@babel/standalone"]);
 };
 
-target["new-version"] = function () {
-  target["new-version-checklist"]();
-
+target["new-babel-8-version"] = function () {
   exec("git", ["pull", "--rebase"]);
-  yarn(["release-tool", "version", "-f", "@babel/standalone"]);
+
+  const pkg = JSON.parse(readFileSync("./package.json", "utf8"));
+  const nextVersion = semver.inc(pkg.version_babel8, "prerelease");
+  pkg.version_babel8 = nextVersion;
+  writeFileSync("./package.json", JSON.stringify(pkg, null, 2) + "\n");
+  exec("git", ["add", "./package.json"]);
+  exec("git", ["commit", "-m", "Bump Babel 8 version to " + nextVersion]);
+  exec("git", ["tag", `v${nextVersion}`, "-m", `v${nextVersion}`]);
+
+  return nextVersion;
+};
+
+function bumpVersionsToBabel8Pre() {
+  const pkg = JSON.parse(readFileSync("./package.json", "utf8"));
+  const nextVersion = pkg.version_babel8;
+
+  SOURCES.forEach(source => {
+    readdirSync(source).forEach(name => {
+      const pkgPath = `${source}/${name}/package.json`;
+      if (existsSync(pkgPath)) {
+        const pkg = JSON.parse(readFileSync(pkgPath, "utf8"));
+        if (pkg.peerDependencies?.["@babel/core"]) {
+          pkg.peerDependencies["@babel/core"] = `^${nextVersion}`;
+        }
+        const babel8Condition = pkg.conditions?.["BABEL_8_BREAKING"][0];
+        if (babel8Condition?.peerDependencies?.["@babel/core"]) {
+          babel8Condition.peerDependencies["@babel/core"] = `^${nextVersion}`;
+        }
+        if (name === "babel-eslint-plugin") {
+          babel8Condition.peerDependencies["@babel/eslint-parser"] =
+            `^${nextVersion}`;
+        }
+        writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + "\n");
+      }
+    });
+  });
+
+  env(() => yarn(["install"]), {
+    YARN_ENABLE_IMMUTABLE_INSTALLS: false,
+  });
+
+  return nextVersion;
+}
+
+target["new-babel-8-version-create-commit-ci"] = function () {
+  const nextVersion = bumpVersionsToBabel8Pre();
+  yarn([
+    "release-tool",
+    "version",
+    nextVersion,
+    "--all",
+    "--tag-version-prefix",
+    "tmp.v",
+    "--yes",
+  ]);
+};
+
+target["new-babel-8-version-create-commit"] = function () {
+  const nextVersion = bumpVersionsToBabel8Pre();
+  exec("git", ["checkout", "-b", `release/temp/v${nextVersion}`]);
+  yarn([
+    "release-tool",
+    "version",
+    nextVersion,
+    "--all",
+    "--tag-version-prefix",
+    "tmp.v",
+  ]);
+
+  console.log("Run `BABEL_8_BREAKING=true make publish` to finish publishing");
 };

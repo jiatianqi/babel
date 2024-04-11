@@ -3,7 +3,7 @@ import * as babel from "@babel/core";
 import path from "path";
 import fs from "fs";
 
-import * as watcher from "./watcher";
+import * as watcher from "./watcher.ts";
 
 import type { FileResult, InputOptions } from "@babel/core";
 
@@ -61,7 +61,7 @@ export function addSourceMappingUrl(code: string, loc: string): string {
 
 export function hasDataSourcemap(code: string): boolean {
   const pos = code.lastIndexOf("\n", code.length - 2);
-  return pos != -1 && code.lastIndexOf("//# sourceMappingURL") < pos;
+  return pos !== -1 && code.lastIndexOf("//# sourceMappingURL") < pos;
 }
 
 const CALLER = {
@@ -89,13 +89,14 @@ export async function compile(filename: string, opts: InputOptions) {
     caller: CALLER,
   };
 
-  // TODO (Babel 8): Use `babel.transformFileAsync`
-  const result = await new Promise<FileResult>((resolve, reject) => {
-    babel.transformFile(filename, opts, (err, result) => {
-      if (err) reject(err);
-      else resolve(result);
-    });
-  });
+  const result = process.env.BABEL_8_BREAKING
+    ? await babel.transformFileAsync(filename, opts)
+    : await new Promise<FileResult>((resolve, reject) => {
+        babel.transformFile(filename, opts, (err, result) => {
+          if (err) reject(err);
+          else resolve(result);
+        });
+      });
 
   if (result) {
     if (!process.env.BABEL_8_BREAKING) {

@@ -2,9 +2,9 @@ import slash from "slash";
 import path from "path";
 import fs from "fs";
 
-import * as util from "./util";
-import * as watcher from "./watcher";
-import type { CmdOptions } from "./options";
+import * as util from "./util.ts";
+import * as watcher from "./watcher.ts";
+import type { CmdOptions } from "./options.ts";
 
 const FILE_TYPE = Object.freeze({
   NON_COMPILABLE: "NON_COMPILABLE",
@@ -53,7 +53,7 @@ export default async function ({
         let outputMap: "both" | "external" | false = false;
         if (babelOptions.sourceMaps && babelOptions.sourceMaps !== "inline") {
           outputMap = "external";
-        } else if (babelOptions.sourceMaps == undefined) {
+        } else if (babelOptions.sourceMaps == null) {
           outputMap = util.hasDataSourcemap(res.code) ? "external" : "both";
         }
 

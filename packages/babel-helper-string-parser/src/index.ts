@@ -116,17 +116,16 @@ export function readStringContents(
       ++pos;
     }
   }
-  return {
-    pos,
-    str: out,
-    firstInvalidLoc,
-    lineStart,
-    curLine,
-
-    // TODO(Babel 8): This is only needed for backwards compatibility,
-    // we can remove it.
-    containsInvalid: !!firstInvalidLoc,
-  };
+  return process.env.BABEL_8_BREAKING
+    ? { pos, str: out, firstInvalidLoc, lineStart, curLine }
+    : {
+        pos,
+        str: out,
+        firstInvalidLoc,
+        lineStart,
+        curLine,
+        containsInvalid: !!firstInvalidLoc,
+      };
 }
 
 function isStringEnd(
@@ -228,7 +227,7 @@ function readEscapedChar(
     default:
       if (ch >= charCodes.digit0 && ch <= charCodes.digit7) {
         const startPos = pos - 1;
-        const match = input.slice(startPos, pos + 2).match(/^[0-7]+/)!;
+        const match = input.slice(startPos, pos + 2).match(/^[0-7]+/);
 
         let octalStr = match[0];
 
@@ -339,10 +338,10 @@ export function readInt(
     radix === 16
       ? isAllowedNumericSeparatorSibling.hex
       : radix === 10
-      ? isAllowedNumericSeparatorSibling.dec
-      : radix === 8
-      ? isAllowedNumericSeparatorSibling.oct
-      : isAllowedNumericSeparatorSibling.bin;
+        ? isAllowedNumericSeparatorSibling.dec
+        : radix === 8
+          ? isAllowedNumericSeparatorSibling.oct
+          : isAllowedNumericSeparatorSibling.bin;
 
   let invalid = false;
   let total = 0;

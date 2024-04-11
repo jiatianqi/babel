@@ -27,7 +27,7 @@ const PURE_CALLS: [string, Set<string>][] = [
 ];
 
 export default declare(api => {
-  api.assertVersion(7);
+  api.assertVersion(REQUIRED_VERSION(7));
 
   return {
     name: "transform-react-pure-annotations",

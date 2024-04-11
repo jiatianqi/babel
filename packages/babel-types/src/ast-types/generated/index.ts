@@ -11,6 +11,12 @@ interface BaseComment {
   type: "CommentBlock" | "CommentLine";
 }
 
+interface Position {
+  line: number;
+  column: number;
+  index: number;
+}
+
 export interface CommentBlock extends BaseComment {
   type: "CommentBlock";
 }
@@ -22,15 +28,10 @@ export interface CommentLine extends BaseComment {
 export type Comment = CommentBlock | CommentLine;
 
 export interface SourceLocation {
-  start: {
-    line: number;
-    column: number;
-  };
-
-  end: {
-    line: number;
-    column: number;
-  };
+  start: Position;
+  end: Position;
+  filename: string;
+  identifierName: string | undefined | null;
 }
 
 interface BaseNode {
@@ -130,6 +131,7 @@ export type Node =
   | ImportAttribute
   | ImportDeclaration
   | ImportDefaultSpecifier
+  | ImportExpression
   | ImportNamespaceSpecifier
   | ImportSpecifier
   | IndexedAccessType
@@ -310,7 +312,7 @@ export interface ArrayExpression extends BaseNode {
 export interface AssignmentExpression extends BaseNode {
   type: "AssignmentExpression";
   operator: string;
-  left: LVal;
+  left: LVal | OptionalMemberExpression;
   right: Expression;
 }
 
@@ -568,7 +570,6 @@ export interface Program extends BaseNode {
   directives: Array<Directive>;
   sourceType: "script" | "module";
   interpreter?: InterpreterDirective | null;
-  sourceFile: string;
 }
 
 export interface ObjectExpression extends BaseNode {
@@ -688,7 +689,7 @@ export interface UpdateExpression extends BaseNode {
 
 export interface VariableDeclaration extends BaseNode {
   type: "VariableDeclaration";
-  kind: "var" | "let" | "const" | "using";
+  kind: "var" | "let" | "const" | "using" | "await using";
   declarations: Array<VariableDeclarator>;
   declare?: boolean | null;
 }
@@ -725,6 +726,7 @@ export interface AssignmentPattern extends BaseNode {
     | TSNonNullExpression;
   right: Expression;
   decorators?: Array<Decorator> | null;
+  optional?: boolean | null;
   typeAnnotation?: TypeAnnotation | TSTypeAnnotation | Noop | null;
 }
 
@@ -787,7 +789,7 @@ export interface ClassExpression extends BaseNode {
 
 export interface ClassDeclaration extends BaseNode {
   type: "ClassDeclaration";
-  id: Identifier;
+  id?: Identifier | null;
   superClass?: Expression | null;
   body: ClassBody;
   decorators?: Array<Decorator> | null;
@@ -810,6 +812,7 @@ export interface ExportAllDeclaration extends BaseNode {
   type: "ExportAllDeclaration";
   source: StringLiteral;
   assertions?: Array<ImportAttribute> | null;
+  attributes?: Array<ImportAttribute> | null;
   exportKind?: "type" | "value" | null;
 }
 
@@ -831,6 +834,7 @@ export interface ExportNamedDeclaration extends BaseNode {
   >;
   source?: StringLiteral | null;
   assertions?: Array<ImportAttribute> | null;
+  attributes?: Array<ImportAttribute> | null;
   exportKind?: "type" | "value" | null;
 }
 
@@ -856,8 +860,10 @@ export interface ImportDeclaration extends BaseNode {
   >;
   source: StringLiteral;
   assertions?: Array<ImportAttribute> | null;
+  attributes?: Array<ImportAttribute> | null;
   importKind?: "type" | "typeof" | "value" | null;
   module?: boolean | null;
+  phase?: "source" | "defer" | null;
 }
 
 export interface ImportDefaultSpecifier extends BaseNode {
@@ -875,6 +881,13 @@ export interface ImportSpecifier extends BaseNode {
   local: Identifier;
   imported: Identifier | StringLiteral;
   importKind?: "type" | "typeof" | "value" | null;
+}
+
+export interface ImportExpression extends BaseNode {
+  type: "ImportExpression";
+  source: Expression;
+  options?: Expression | null;
+  phase?: "source" | "defer" | null;
 }
 
 export interface MetaProperty extends BaseNode {
@@ -911,6 +924,7 @@ export interface ObjectPattern extends BaseNode {
   type: "ObjectPattern";
   properties: Array<RestElement | ObjectProperty>;
   decorators?: Array<Decorator> | null;
+  optional?: boolean | null;
   typeAnnotation?: TypeAnnotation | TSTypeAnnotation | Noop | null;
 }
 
@@ -1135,8 +1149,6 @@ export interface DeclareInterface extends BaseNode {
   typeParameters?: TypeParameterDeclaration | null;
   extends?: Array<InterfaceExtends> | null;
   body: ObjectTypeAnnotation;
-  implements?: Array<ClassImplements> | null;
-  mixins?: Array<InterfaceExtends> | null;
 }
 
 export interface DeclareModule extends BaseNode {
@@ -1232,8 +1244,6 @@ export interface InterfaceDeclaration extends BaseNode {
   typeParameters?: TypeParameterDeclaration | null;
   extends?: Array<InterfaceExtends> | null;
   body: ObjectTypeAnnotation;
-  implements?: Array<ClassImplements> | null;
-  mixins?: Array<InterfaceExtends> | null;
 }
 
 export interface InterfaceTypeAnnotation extends BaseNode {
@@ -1716,14 +1726,14 @@ export interface TSQualifiedName extends BaseNode {
 export interface TSCallSignatureDeclaration extends BaseNode {
   type: "TSCallSignatureDeclaration";
   typeParameters?: TSTypeParameterDeclaration | null;
-  parameters: Array<Identifier | RestElement>;
+  parameters: Array<ArrayPattern | Identifier | ObjectPattern | RestElement>;
   typeAnnotation?: TSTypeAnnotation | null;
 }
 
 export interface TSConstructSignatureDeclaration extends BaseNode {
   type: "TSConstructSignatureDeclaration";
   typeParameters?: TSTypeParameterDeclaration | null;
-  parameters: Array<Identifier | RestElement>;
+  parameters: Array<ArrayPattern | Identifier | ObjectPattern | RestElement>;
   typeAnnotation?: TSTypeAnnotation | null;
 }
 
@@ -1731,7 +1741,6 @@ export interface TSPropertySignature extends BaseNode {
   type: "TSPropertySignature";
   key: Expression;
   typeAnnotation?: TSTypeAnnotation | null;
-  initializer?: Expression | null;
   computed?: boolean;
   kind: "get" | "set";
   optional?: boolean | null;
@@ -1742,7 +1751,7 @@ export interface TSMethodSignature extends BaseNode {
   type: "TSMethodSignature";
   key: Expression;
   typeParameters?: TSTypeParameterDeclaration | null;
-  parameters: Array<Identifier | RestElement>;
+  parameters: Array<ArrayPattern | Identifier | ObjectPattern | RestElement>;
   typeAnnotation?: TSTypeAnnotation | null;
   computed?: boolean;
   kind: "method" | "get" | "set";
@@ -1816,14 +1825,14 @@ export interface TSThisType extends BaseNode {
 export interface TSFunctionType extends BaseNode {
   type: "TSFunctionType";
   typeParameters?: TSTypeParameterDeclaration | null;
-  parameters: Array<Identifier | RestElement>;
+  parameters: Array<ArrayPattern | Identifier | ObjectPattern | RestElement>;
   typeAnnotation?: TSTypeAnnotation | null;
 }
 
 export interface TSConstructorType extends BaseNode {
   type: "TSConstructorType";
   typeParameters?: TSTypeParameterDeclaration | null;
-  parameters: Array<Identifier | RestElement>;
+  parameters: Array<ArrayPattern | Identifier | ObjectPattern | RestElement>;
   typeAnnotation?: TSTypeAnnotation | null;
   abstract?: boolean | null;
 }
@@ -2024,6 +2033,7 @@ export interface TSImportType extends BaseNode {
   argument: StringLiteral;
   qualifier?: TSEntityName | null;
   typeParameters?: TSTypeParameterInstantiation | null;
+  options?: Expression | null;
 }
 
 export interface TSImportEqualsDeclaration extends BaseNode {
@@ -2074,6 +2084,7 @@ export interface TSTypeParameter extends BaseNode {
   constraint?: TSType | null;
   default?: TSType | null;
   name: string;
+  const?: boolean | null;
   in?: boolean | null;
   out?: boolean | null;
 }
@@ -2145,6 +2156,7 @@ export type Standardized =
   | ImportDefaultSpecifier
   | ImportNamespaceSpecifier
   | ImportSpecifier
+  | ImportExpression
   | MetaProperty
   | ClassMethod
   | ObjectPattern
@@ -2190,6 +2202,7 @@ export type Expression =
   | UpdateExpression
   | ArrowFunctionExpression
   | ClassExpression
+  | ImportExpression
   | MetaProperty
   | Super
   | TaggedTemplateExpression
@@ -2453,7 +2466,7 @@ export type Property =
 export type UnaryLike = UnaryExpression | SpreadElement;
 export type Pattern = AssignmentPattern | ArrayPattern | ObjectPattern;
 export type Class = ClassExpression | ClassDeclaration;
-export type ModuleDeclaration =
+export type ImportOrExportDeclaration =
   | ExportAllDeclaration
   | ExportDefaultDeclaration
   | ExportNamedDeclaration
@@ -2741,6 +2754,11 @@ export type TSBaseType =
   | TSVoidKeyword
   | TSThisType
   | TSLiteralType;
+export type ModuleDeclaration =
+  | ExportAllDeclaration
+  | ExportDefaultDeclaration
+  | ExportNamedDeclaration
+  | ImportDeclaration;
 
 export interface Aliases {
   Standardized: Standardized;
@@ -2774,7 +2792,7 @@ export interface Aliases {
   UnaryLike: UnaryLike;
   Pattern: Pattern;
   Class: Class;
-  ModuleDeclaration: ModuleDeclaration;
+  ImportOrExportDeclaration: ImportOrExportDeclaration;
   ExportDeclaration: ExportDeclaration;
   ModuleSpecifier: ModuleSpecifier;
   Accessor: Accessor;
@@ -2792,6 +2810,7 @@ export interface Aliases {
   TSTypeElement: TSTypeElement;
   TSType: TSType;
   TSBaseType: TSBaseType;
+  ModuleDeclaration: ModuleDeclaration;
 }
 
 export type DeprecatedAliases =
@@ -2851,6 +2870,7 @@ export interface ParentMaps {
     | ForOfStatement
     | ForStatement
     | IfStatement
+    | ImportExpression
     | JSXExpressionContainer
     | JSXSpreadAttribute
     | JSXSpreadChild
@@ -2874,6 +2894,7 @@ export interface ParentMaps {
     | TSEnumDeclaration
     | TSEnumMember
     | TSExportAssignment
+    | TSImportType
     | TSInstantiationExpression
     | TSMethodSignature
     | TSNonNullExpression
@@ -2906,8 +2927,13 @@ export interface ParentMaps {
     | ObjectMethod
     | ObjectProperty
     | RestElement
+    | TSCallSignatureDeclaration
+    | TSConstructSignatureDeclaration
+    | TSConstructorType
     | TSDeclareFunction
     | TSDeclareMethod
+    | TSFunctionType
+    | TSMethodSignature
     | VariableDeclarator;
   ArrayTypeAnnotation:
     | ArrayTypeAnnotation
@@ -2958,6 +2984,7 @@ export interface ParentMaps {
     | ForOfStatement
     | ForStatement
     | IfStatement
+    | ImportExpression
     | JSXExpressionContainer
     | JSXSpreadAttribute
     | JSXSpreadChild
@@ -2981,6 +3008,7 @@ export interface ParentMaps {
     | TSEnumDeclaration
     | TSEnumMember
     | TSExportAssignment
+    | TSImportType
     | TSInstantiationExpression
     | TSMethodSignature
     | TSNonNullExpression
@@ -3022,6 +3050,7 @@ export interface ParentMaps {
     | ForOfStatement
     | ForStatement
     | IfStatement
+    | ImportExpression
     | JSXExpressionContainer
     | JSXSpreadAttribute
     | JSXSpreadChild
@@ -3045,6 +3074,7 @@ export interface ParentMaps {
     | TSEnumDeclaration
     | TSEnumMember
     | TSExportAssignment
+    | TSImportType
     | TSInstantiationExpression
     | TSMethodSignature
     | TSNonNullExpression
@@ -3103,6 +3133,7 @@ export interface ParentMaps {
     | ForOfStatement
     | ForStatement
     | IfStatement
+    | ImportExpression
     | JSXExpressionContainer
     | JSXSpreadAttribute
     | JSXSpreadChild
@@ -3126,6 +3157,7 @@ export interface ParentMaps {
     | TSEnumDeclaration
     | TSEnumMember
     | TSExportAssignment
+    | TSImportType
     | TSInstantiationExpression
     | TSMethodSignature
     | TSNonNullExpression
@@ -3167,6 +3199,7 @@ export interface ParentMaps {
     | ForOfStatement
     | ForStatement
     | IfStatement
+    | ImportExpression
     | JSXExpressionContainer
     | JSXSpreadAttribute
     | JSXSpreadChild
@@ -3190,6 +3223,7 @@ export interface ParentMaps {
     | TSEnumDeclaration
     | TSEnumMember
     | TSExportAssignment
+    | TSImportType
     | TSInstantiationExpression
     | TSLiteralType
     | TSMethodSignature
@@ -3232,6 +3266,7 @@ export interface ParentMaps {
     | ForOfStatement
     | ForStatement
     | IfStatement
+    | ImportExpression
     | JSXExpressionContainer
     | JSXSpreadAttribute
     | JSXSpreadChild
@@ -3255,6 +3290,7 @@ export interface ParentMaps {
     | TSEnumDeclaration
     | TSEnumMember
     | TSExportAssignment
+    | TSImportType
     | TSInstantiationExpression
     | TSMethodSignature
     | TSNonNullExpression
@@ -3296,6 +3332,7 @@ export interface ParentMaps {
     | ForOfStatement
     | ForStatement
     | IfStatement
+    | ImportExpression
     | JSXExpressionContainer
     | JSXSpreadAttribute
     | JSXSpreadChild
@@ -3319,6 +3356,7 @@ export interface ParentMaps {
     | TSEnumDeclaration
     | TSEnumMember
     | TSExportAssignment
+    | TSImportType
     | TSInstantiationExpression
     | TSMethodSignature
     | TSNonNullExpression
@@ -3385,6 +3423,7 @@ export interface ParentMaps {
     | ForOfStatement
     | ForStatement
     | IfStatement
+    | ImportExpression
     | JSXExpressionContainer
     | JSXSpreadAttribute
     | JSXSpreadChild
@@ -3408,6 +3447,7 @@ export interface ParentMaps {
     | TSEnumDeclaration
     | TSEnumMember
     | TSExportAssignment
+    | TSImportType
     | TSInstantiationExpression
     | TSLiteralType
     | TSMethodSignature
@@ -3514,6 +3554,7 @@ export interface ParentMaps {
     | ForOfStatement
     | ForStatement
     | IfStatement
+    | ImportExpression
     | JSXExpressionContainer
     | JSXSpreadAttribute
     | JSXSpreadChild
@@ -3537,6 +3578,7 @@ export interface ParentMaps {
     | TSEnumDeclaration
     | TSEnumMember
     | TSExportAssignment
+    | TSImportType
     | TSInstantiationExpression
     | TSMethodSignature
     | TSNonNullExpression
@@ -3597,6 +3639,7 @@ export interface ParentMaps {
     | ForOfStatement
     | ForStatement
     | IfStatement
+    | ImportExpression
     | JSXExpressionContainer
     | JSXSpreadAttribute
     | JSXSpreadChild
@@ -3620,6 +3663,7 @@ export interface ParentMaps {
     | TSEnumDeclaration
     | TSEnumMember
     | TSExportAssignment
+    | TSImportType
     | TSInstantiationExpression
     | TSMethodSignature
     | TSNonNullExpression
@@ -3642,9 +3686,7 @@ export interface ParentMaps {
     | ClassExpression
     | DeclareClass
     | DeclareExportDeclaration
-    | DeclareInterface
-    | DeclaredPredicate
-    | InterfaceDeclaration;
+    | DeclaredPredicate;
   ClassMethod: ClassBody;
   ClassPrivateMethod: ClassBody;
   ClassPrivateProperty: ClassBody;
@@ -3675,6 +3717,7 @@ export interface ParentMaps {
     | ForOfStatement
     | ForStatement
     | IfStatement
+    | ImportExpression
     | JSXExpressionContainer
     | JSXSpreadAttribute
     | JSXSpreadChild
@@ -3698,6 +3741,7 @@ export interface ParentMaps {
     | TSEnumDeclaration
     | TSEnumMember
     | TSExportAssignment
+    | TSImportType
     | TSInstantiationExpression
     | TSMethodSignature
     | TSNonNullExpression
@@ -3767,6 +3811,7 @@ export interface ParentMaps {
     | ForOfStatement
     | ForStatement
     | IfStatement
+    | ImportExpression
     | JSXExpressionContainer
     | JSXSpreadAttribute
     | JSXSpreadChild
@@ -3790,6 +3835,7 @@ export interface ParentMaps {
     | TSEnumDeclaration
     | TSEnumMember
     | TSExportAssignment
+    | TSImportType
     | TSInstantiationExpression
     | TSMethodSignature
     | TSNonNullExpression
@@ -4027,6 +4073,7 @@ export interface ParentMaps {
     | ForOfStatement
     | ForStatement
     | IfStatement
+    | ImportExpression
     | JSXExpressionContainer
     | JSXSpreadAttribute
     | JSXSpreadChild
@@ -4050,6 +4097,7 @@ export interface ParentMaps {
     | TSEnumDeclaration
     | TSEnumMember
     | TSExportAssignment
+    | TSImportType
     | TSInstantiationExpression
     | TSMethodSignature
     | TSNonNullExpression
@@ -4340,6 +4388,7 @@ export interface ParentMaps {
     | ForOfStatement
     | ForStatement
     | IfStatement
+    | ImportExpression
     | JSXExpressionContainer
     | JSXSpreadAttribute
     | JSXSpreadChild
@@ -4363,6 +4412,7 @@ export interface ParentMaps {
     | TSEnumDeclaration
     | TSEnumMember
     | TSExportAssignment
+    | TSImportType
     | TSInstantiationExpression
     | TSMethodSignature
     | TSNonNullExpression
@@ -4485,6 +4535,7 @@ export interface ParentMaps {
     | IfStatement
     | ImportAttribute
     | ImportDefaultSpecifier
+    | ImportExpression
     | ImportNamespaceSpecifier
     | ImportSpecifier
     | InterfaceDeclaration
@@ -4597,6 +4648,7 @@ export interface ParentMaps {
     | ForOfStatement
     | ForStatement
     | IfStatement
+    | ImportExpression
     | JSXExpressionContainer
     | JSXSpreadAttribute
     | JSXSpreadChild
@@ -4620,6 +4672,7 @@ export interface ParentMaps {
     | TSEnumDeclaration
     | TSEnumMember
     | TSExportAssignment
+    | TSImportType
     | TSInstantiationExpression
     | TSMethodSignature
     | TSNonNullExpression
@@ -4657,6 +4710,72 @@ export interface ParentMaps {
     | WhileStatement
     | WithStatement;
   ImportDefaultSpecifier: ImportDeclaration;
+  ImportExpression:
+    | ArrayExpression
+    | ArrowFunctionExpression
+    | AssignmentExpression
+    | AssignmentPattern
+    | AwaitExpression
+    | BinaryExpression
+    | BindExpression
+    | CallExpression
+    | ClassAccessorProperty
+    | ClassDeclaration
+    | ClassExpression
+    | ClassMethod
+    | ClassPrivateProperty
+    | ClassProperty
+    | ConditionalExpression
+    | Decorator
+    | DoWhileStatement
+    | ExportDefaultDeclaration
+    | ExpressionStatement
+    | ForInStatement
+    | ForOfStatement
+    | ForStatement
+    | IfStatement
+    | ImportExpression
+    | JSXExpressionContainer
+    | JSXSpreadAttribute
+    | JSXSpreadChild
+    | LogicalExpression
+    | MemberExpression
+    | NewExpression
+    | ObjectMethod
+    | ObjectProperty
+    | OptionalCallExpression
+    | OptionalMemberExpression
+    | ParenthesizedExpression
+    | PipelineBareFunction
+    | PipelineTopicExpression
+    | ReturnStatement
+    | SequenceExpression
+    | SpreadElement
+    | SwitchCase
+    | SwitchStatement
+    | TSAsExpression
+    | TSDeclareMethod
+    | TSEnumDeclaration
+    | TSEnumMember
+    | TSExportAssignment
+    | TSImportType
+    | TSInstantiationExpression
+    | TSMethodSignature
+    | TSNonNullExpression
+    | TSPropertySignature
+    | TSSatisfiesExpression
+    | TSTypeAssertion
+    | TaggedTemplateExpression
+    | TemplateLiteral
+    | ThrowStatement
+    | TupleExpression
+    | TypeCastExpression
+    | UnaryExpression
+    | UpdateExpression
+    | VariableDeclarator
+    | WhileStatement
+    | WithStatement
+    | YieldExpression;
   ImportNamespaceSpecifier: ImportDeclaration;
   ImportSpecifier: ImportDeclaration;
   IndexedAccessType:
@@ -4794,6 +4913,7 @@ export interface ParentMaps {
     | ForOfStatement
     | ForStatement
     | IfStatement
+    | ImportExpression
     | JSXAttribute
     | JSXElement
     | JSXExpressionContainer
@@ -4820,6 +4940,7 @@ export interface ParentMaps {
     | TSEnumDeclaration
     | TSEnumMember
     | TSExportAssignment
+    | TSImportType
     | TSInstantiationExpression
     | TSMethodSignature
     | TSNonNullExpression
@@ -4863,6 +4984,7 @@ export interface ParentMaps {
     | ForOfStatement
     | ForStatement
     | IfStatement
+    | ImportExpression
     | JSXAttribute
     | JSXElement
     | JSXExpressionContainer
@@ -4889,6 +5011,7 @@ export interface ParentMaps {
     | TSEnumDeclaration
     | TSEnumMember
     | TSExportAssignment
+    | TSImportType
     | TSInstantiationExpression
     | TSMethodSignature
     | TSNonNullExpression
@@ -4966,6 +5089,7 @@ export interface ParentMaps {
     | ForOfStatement
     | ForStatement
     | IfStatement
+    | ImportExpression
     | JSXExpressionContainer
     | JSXSpreadAttribute
     | JSXSpreadChild
@@ -4989,6 +5113,7 @@ export interface ParentMaps {
     | TSEnumDeclaration
     | TSEnumMember
     | TSExportAssignment
+    | TSImportType
     | TSInstantiationExpression
     | TSMethodSignature
     | TSNonNullExpression
@@ -5031,6 +5156,7 @@ export interface ParentMaps {
     | ForOfStatement
     | ForStatement
     | IfStatement
+    | ImportExpression
     | JSXExpressionContainer
     | JSXSpreadAttribute
     | JSXSpreadChild
@@ -5055,6 +5181,7 @@ export interface ParentMaps {
     | TSEnumDeclaration
     | TSEnumMember
     | TSExportAssignment
+    | TSImportType
     | TSInstantiationExpression
     | TSMethodSignature
     | TSNonNullExpression
@@ -5096,6 +5223,7 @@ export interface ParentMaps {
     | ForOfStatement
     | ForStatement
     | IfStatement
+    | ImportExpression
     | JSXExpressionContainer
     | JSXSpreadAttribute
     | JSXSpreadChild
@@ -5119,6 +5247,7 @@ export interface ParentMaps {
     | TSEnumDeclaration
     | TSEnumMember
     | TSExportAssignment
+    | TSImportType
     | TSInstantiationExpression
     | TSMethodSignature
     | TSNonNullExpression
@@ -5185,6 +5314,7 @@ export interface ParentMaps {
     | ForOfStatement
     | ForStatement
     | IfStatement
+    | ImportExpression
     | JSXExpressionContainer
     | JSXSpreadAttribute
     | JSXSpreadChild
@@ -5208,6 +5338,7 @@ export interface ParentMaps {
     | TSEnumDeclaration
     | TSEnumMember
     | TSExportAssignment
+    | TSImportType
     | TSInstantiationExpression
     | TSMethodSignature
     | TSNonNullExpression
@@ -5249,6 +5380,7 @@ export interface ParentMaps {
     | ForOfStatement
     | ForStatement
     | IfStatement
+    | ImportExpression
     | JSXExpressionContainer
     | JSXSpreadAttribute
     | JSXSpreadChild
@@ -5272,6 +5404,7 @@ export interface ParentMaps {
     | TSEnumDeclaration
     | TSEnumMember
     | TSExportAssignment
+    | TSImportType
     | TSInstantiationExpression
     | TSMethodSignature
     | TSNonNullExpression
@@ -5332,6 +5465,7 @@ export interface ParentMaps {
     | ForOfStatement
     | ForStatement
     | IfStatement
+    | ImportExpression
     | JSXExpressionContainer
     | JSXSpreadAttribute
     | JSXSpreadChild
@@ -5355,6 +5489,7 @@ export interface ParentMaps {
     | TSEnumDeclaration
     | TSEnumMember
     | TSExportAssignment
+    | TSImportType
     | TSInstantiationExpression
     | TSMethodSignature
     | TSNonNullExpression
@@ -5498,6 +5633,7 @@ export interface ParentMaps {
     | ForOfStatement
     | ForStatement
     | IfStatement
+    | ImportExpression
     | JSXExpressionContainer
     | JSXSpreadAttribute
     | JSXSpreadChild
@@ -5521,6 +5657,7 @@ export interface ParentMaps {
     | TSEnumDeclaration
     | TSEnumMember
     | TSExportAssignment
+    | TSImportType
     | TSInstantiationExpression
     | TSLiteralType
     | TSMethodSignature
@@ -5563,6 +5700,7 @@ export interface ParentMaps {
     | ForOfStatement
     | ForStatement
     | IfStatement
+    | ImportExpression
     | JSXExpressionContainer
     | JSXSpreadAttribute
     | JSXSpreadChild
@@ -5586,6 +5724,7 @@ export interface ParentMaps {
     | TSEnumDeclaration
     | TSEnumMember
     | TSExportAssignment
+    | TSImportType
     | TSInstantiationExpression
     | TSMethodSignature
     | TSNonNullExpression
@@ -5619,8 +5758,13 @@ export interface ParentMaps {
     | ObjectMethod
     | ObjectProperty
     | RestElement
+    | TSCallSignatureDeclaration
+    | TSConstructSignatureDeclaration
+    | TSConstructorType
     | TSDeclareFunction
     | TSDeclareMethod
+    | TSFunctionType
+    | TSMethodSignature
     | VariableDeclarator;
   ObjectProperty: ObjectExpression | ObjectPattern | RecordExpression;
   ObjectTypeAnnotation:
@@ -5713,6 +5857,7 @@ export interface ParentMaps {
     | ForOfStatement
     | ForStatement
     | IfStatement
+    | ImportExpression
     | JSXExpressionContainer
     | JSXSpreadAttribute
     | JSXSpreadChild
@@ -5736,6 +5881,7 @@ export interface ParentMaps {
     | TSEnumDeclaration
     | TSEnumMember
     | TSExportAssignment
+    | TSImportType
     | TSInstantiationExpression
     | TSMethodSignature
     | TSNonNullExpression
@@ -5802,6 +5948,7 @@ export interface ParentMaps {
     | ForOfStatement
     | ForStatement
     | IfStatement
+    | ImportExpression
     | JSXExpressionContainer
     | JSXSpreadAttribute
     | JSXSpreadChild
@@ -5825,6 +5972,7 @@ export interface ParentMaps {
     | TSEnumDeclaration
     | TSEnumMember
     | TSExportAssignment
+    | TSImportType
     | TSInstantiationExpression
     | TSMethodSignature
     | TSNonNullExpression
@@ -5866,6 +6014,7 @@ export interface ParentMaps {
     | ForOfStatement
     | ForStatement
     | IfStatement
+    | ImportExpression
     | JSXExpressionContainer
     | JSXSpreadAttribute
     | JSXSpreadChild
@@ -5889,6 +6038,7 @@ export interface ParentMaps {
     | TSEnumDeclaration
     | TSEnumMember
     | TSExportAssignment
+    | TSImportType
     | TSInstantiationExpression
     | TSMethodSignature
     | TSNonNullExpression
@@ -5930,6 +6080,7 @@ export interface ParentMaps {
     | ForOfStatement
     | ForStatement
     | IfStatement
+    | ImportExpression
     | JSXExpressionContainer
     | JSXSpreadAttribute
     | JSXSpreadChild
@@ -5953,6 +6104,7 @@ export interface ParentMaps {
     | TSEnumDeclaration
     | TSEnumMember
     | TSExportAssignment
+    | TSImportType
     | TSInstantiationExpression
     | TSMethodSignature
     | TSNonNullExpression
@@ -5994,6 +6146,7 @@ export interface ParentMaps {
     | ForOfStatement
     | ForStatement
     | IfStatement
+    | ImportExpression
     | JSXExpressionContainer
     | JSXSpreadAttribute
     | JSXSpreadChild
@@ -6017,6 +6170,7 @@ export interface ParentMaps {
     | TSEnumDeclaration
     | TSEnumMember
     | TSExportAssignment
+    | TSImportType
     | TSInstantiationExpression
     | TSMethodSignature
     | TSNonNullExpression
@@ -6058,6 +6212,7 @@ export interface ParentMaps {
     | ForOfStatement
     | ForStatement
     | IfStatement
+    | ImportExpression
     | JSXExpressionContainer
     | JSXSpreadAttribute
     | JSXSpreadChild
@@ -6081,6 +6236,7 @@ export interface ParentMaps {
     | TSEnumDeclaration
     | TSEnumMember
     | TSExportAssignment
+    | TSImportType
     | TSInstantiationExpression
     | TSMethodSignature
     | TSNonNullExpression
@@ -6137,6 +6293,7 @@ export interface ParentMaps {
     | ForOfStatement
     | ForStatement
     | IfStatement
+    | ImportExpression
     | JSXExpressionContainer
     | JSXSpreadAttribute
     | JSXSpreadChild
@@ -6160,6 +6317,7 @@ export interface ParentMaps {
     | TSEnumDeclaration
     | TSEnumMember
     | TSExportAssignment
+    | TSImportType
     | TSInstantiationExpression
     | TSMethodSignature
     | TSNonNullExpression
@@ -6201,6 +6359,7 @@ export interface ParentMaps {
     | ForOfStatement
     | ForStatement
     | IfStatement
+    | ImportExpression
     | JSXExpressionContainer
     | JSXSpreadAttribute
     | JSXSpreadChild
@@ -6224,6 +6383,7 @@ export interface ParentMaps {
     | TSEnumDeclaration
     | TSEnumMember
     | TSExportAssignment
+    | TSImportType
     | TSInstantiationExpression
     | TSMethodSignature
     | TSNonNullExpression
@@ -6303,6 +6463,7 @@ export interface ParentMaps {
     | ForOfStatement
     | ForStatement
     | IfStatement
+    | ImportExpression
     | JSXExpressionContainer
     | JSXSpreadAttribute
     | JSXSpreadChild
@@ -6326,6 +6487,7 @@ export interface ParentMaps {
     | TSEnumDeclaration
     | TSEnumMember
     | TSExportAssignment
+    | TSImportType
     | TSInstantiationExpression
     | TSMethodSignature
     | TSNonNullExpression
@@ -6386,6 +6548,7 @@ export interface ParentMaps {
     | IfStatement
     | ImportAttribute
     | ImportDeclaration
+    | ImportExpression
     | ImportSpecifier
     | JSXAttribute
     | JSXExpressionContainer
@@ -6507,6 +6670,7 @@ export interface ParentMaps {
     | ForOfStatement
     | ForStatement
     | IfStatement
+    | ImportExpression
     | JSXExpressionContainer
     | JSXSpreadAttribute
     | JSXSpreadChild
@@ -6530,6 +6694,7 @@ export interface ParentMaps {
     | TSEnumDeclaration
     | TSEnumMember
     | TSExportAssignment
+    | TSImportType
     | TSInstantiationExpression
     | TSMethodSignature
     | TSNonNullExpression
@@ -6654,6 +6819,7 @@ export interface ParentMaps {
     | ForOfStatement
     | ForStatement
     | IfStatement
+    | ImportExpression
     | JSXExpressionContainer
     | JSXSpreadAttribute
     | JSXSpreadChild
@@ -6678,6 +6844,7 @@ export interface ParentMaps {
     | TSEnumDeclaration
     | TSEnumMember
     | TSExportAssignment
+    | TSImportType
     | TSInstantiationExpression
     | TSMethodSignature
     | TSNonNullExpression
@@ -6977,6 +7144,7 @@ export interface ParentMaps {
     | ForOfStatement
     | ForStatement
     | IfStatement
+    | ImportExpression
     | JSXExpressionContainer
     | JSXSpreadAttribute
     | JSXSpreadChild
@@ -7000,6 +7168,7 @@ export interface ParentMaps {
     | TSEnumDeclaration
     | TSEnumMember
     | TSExportAssignment
+    | TSImportType
     | TSInstantiationExpression
     | TSMethodSignature
     | TSNonNullExpression
@@ -7196,6 +7365,7 @@ export interface ParentMaps {
     | ForOfStatement
     | ForStatement
     | IfStatement
+    | ImportExpression
     | JSXExpressionContainer
     | JSXSpreadAttribute
     | JSXSpreadChild
@@ -7220,6 +7390,7 @@ export interface ParentMaps {
     | TSEnumDeclaration
     | TSEnumMember
     | TSExportAssignment
+    | TSImportType
     | TSInstantiationExpression
     | TSMethodSignature
     | TSNonNullExpression
@@ -7406,6 +7577,7 @@ export interface ParentMaps {
     | ForOfStatement
     | ForStatement
     | IfStatement
+    | ImportExpression
     | JSXExpressionContainer
     | JSXSpreadAttribute
     | JSXSpreadChild
@@ -7430,6 +7602,7 @@ export interface ParentMaps {
     | TSEnumDeclaration
     | TSEnumMember
     | TSExportAssignment
+    | TSImportType
     | TSInstantiationExpression
     | TSMethodSignature
     | TSNonNullExpression
@@ -7597,6 +7770,7 @@ export interface ParentMaps {
     | ForOfStatement
     | ForStatement
     | IfStatement
+    | ImportExpression
     | JSXExpressionContainer
     | JSXSpreadAttribute
     | JSXSpreadChild
@@ -7621,6 +7795,7 @@ export interface ParentMaps {
     | TSEnumDeclaration
     | TSEnumMember
     | TSExportAssignment
+    | TSImportType
     | TSInstantiationExpression
     | TSMethodSignature
     | TSNonNullExpression
@@ -7883,6 +8058,7 @@ export interface ParentMaps {
     | ForOfStatement
     | ForStatement
     | IfStatement
+    | ImportExpression
     | JSXExpressionContainer
     | JSXSpreadAttribute
     | JSXSpreadChild
@@ -7906,6 +8082,7 @@ export interface ParentMaps {
     | TSEnumDeclaration
     | TSEnumMember
     | TSExportAssignment
+    | TSImportType
     | TSInstantiationExpression
     | TSMethodSignature
     | TSNonNullExpression
@@ -7948,6 +8125,7 @@ export interface ParentMaps {
     | ForOfStatement
     | ForStatement
     | IfStatement
+    | ImportExpression
     | JSXExpressionContainer
     | JSXSpreadAttribute
     | JSXSpreadChild
@@ -7971,6 +8149,7 @@ export interface ParentMaps {
     | TSEnumDeclaration
     | TSEnumMember
     | TSExportAssignment
+    | TSImportType
     | TSInstantiationExpression
     | TSLiteralType
     | TSMethodSignature
@@ -8013,6 +8192,7 @@ export interface ParentMaps {
     | ForOfStatement
     | ForStatement
     | IfStatement
+    | ImportExpression
     | JSXExpressionContainer
     | JSXSpreadAttribute
     | JSXSpreadChild
@@ -8036,6 +8216,7 @@ export interface ParentMaps {
     | TSEnumDeclaration
     | TSEnumMember
     | TSExportAssignment
+    | TSImportType
     | TSInstantiationExpression
     | TSMethodSignature
     | TSNonNullExpression
@@ -8116,6 +8297,7 @@ export interface ParentMaps {
     | ForOfStatement
     | ForStatement
     | IfStatement
+    | ImportExpression
     | JSXExpressionContainer
     | JSXSpreadAttribute
     | JSXSpreadChild
@@ -8139,6 +8321,7 @@ export interface ParentMaps {
     | TSEnumDeclaration
     | TSEnumMember
     | TSExportAssignment
+    | TSImportType
     | TSInstantiationExpression
     | TSMethodSignature
     | TSNonNullExpression
@@ -8194,6 +8377,7 @@ export interface ParentMaps {
     | ForOfStatement
     | ForStatement
     | IfStatement
+    | ImportExpression
     | JSXExpressionContainer
     | JSXSpreadAttribute
     | JSXSpreadChild
@@ -8217,6 +8401,7 @@ export interface ParentMaps {
     | TSEnumDeclaration
     | TSEnumMember
     | TSExportAssignment
+    | TSImportType
     | TSInstantiationExpression
     | TSMethodSignature
     | TSNonNullExpression
@@ -8322,6 +8507,7 @@ export interface ParentMaps {
     | ForOfStatement
     | ForStatement
     | IfStatement
+    | ImportExpression
     | JSXExpressionContainer
     | JSXSpreadAttribute
     | JSXSpreadChild
@@ -8345,6 +8531,7 @@ export interface ParentMaps {
     | TSEnumDeclaration
     | TSEnumMember
     | TSExportAssignment
+    | TSImportType
     | TSInstantiationExpression
     | TSMethodSignature
     | TSNonNullExpression
@@ -8447,6 +8634,7 @@ export interface ParentMaps {
     | ForOfStatement
     | ForStatement
     | IfStatement
+    | ImportExpression
     | JSXExpressionContainer
     | JSXSpreadAttribute
     | JSXSpreadChild
@@ -8470,6 +8658,7 @@ export interface ParentMaps {
     | TSEnumDeclaration
     | TSEnumMember
     | TSExportAssignment
+    | TSImportType
     | TSInstantiationExpression
     | TSLiteralType
     | TSMethodSignature
@@ -8537,6 +8726,7 @@ export interface ParentMaps {
     | ForOfStatement
     | ForStatement
     | IfStatement
+    | ImportExpression
     | JSXExpressionContainer
     | JSXSpreadAttribute
     | JSXSpreadChild
@@ -8560,6 +8750,7 @@ export interface ParentMaps {
     | TSEnumDeclaration
     | TSEnumMember
     | TSExportAssignment
+    | TSImportType
     | TSInstantiationExpression
     | TSMethodSignature
     | TSNonNullExpression
@@ -8680,6 +8871,7 @@ export interface ParentMaps {
     | ForOfStatement
     | ForStatement
     | IfStatement
+    | ImportExpression
     | JSXExpressionContainer
     | JSXSpreadAttribute
     | JSXSpreadChild
@@ -8703,6 +8895,7 @@ export interface ParentMaps {
     | TSEnumDeclaration
     | TSEnumMember
     | TSExportAssignment
+    | TSImportType
     | TSInstantiationExpression
     | TSMethodSignature
     | TSNonNullExpression

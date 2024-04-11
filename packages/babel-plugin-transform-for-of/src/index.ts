@@ -2,7 +2,8 @@ import { declare } from "@babel/helper-plugin-utils";
 import { template, types as t } from "@babel/core";
 import type { NodePath } from "@babel/traverse";
 
-import transformWithoutHelper from "./no-helper-implementation";
+import transformWithoutHelper from "./no-helper-implementation.ts";
+import { skipTransparentExprWrapperNodes } from "@babel/helper-skip-transparent-expression-wrappers";
 
 export interface Options {
   allowArrayLike?: boolean;
@@ -33,7 +34,7 @@ function buildLoopBody(
 }
 
 export default declare((api, options: Options) => {
-  api.assertVersion(7);
+  api.assertVersion(REQUIRED_VERSION(7));
 
   {
     const { assumeArray, allowArrayLike, loose } = options;
@@ -50,11 +51,13 @@ export default declare((api, options: Options) => {
       );
     }
 
-    // TODO: Remove in Babel 8
-    if (allowArrayLike && /^7\.\d\./.test(api.version)) {
-      throw new Error(
-        `The allowArrayLike is only supported when using @babel/core@^7.10.0`,
-      );
+    if (!process.env.BABEL_8_BREAKING) {
+      // TODO: Remove in Babel 8
+      if (allowArrayLike && /^7\.\d\./.test(api.version)) {
+        throw new Error(
+          `The allowArrayLike is only supported when using @babel/core@^7.10.0`,
+        );
+      }
     }
   }
 
@@ -67,7 +70,7 @@ export default declare((api, options: Options) => {
   const arrayLikeIsIterable =
     options.allowArrayLike ?? api.assumption("arrayLikeIsIterable");
 
-  const skipteratorClosing =
+  const skipIteratorClosing =
     api.assumption("skipForOfIteratorClosing") ?? options.loose;
 
   if (iterableIsArray && arrayLikeIsIterable) {
@@ -83,13 +86,24 @@ export default declare((api, options: Options) => {
       visitor: {
         ForOfStatement(path) {
           const { scope } = path;
-          const { left, right, await: isAwait } = path.node;
+          const { left, await: isAwait } = path.node;
           if (isAwait) {
             return;
           }
+          // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
+          const right = skipTransparentExprWrapperNodes(
+            path.node.right,
+          ) as t.Expression;
           const i = scope.generateUidIdentifier("i");
           let array: t.Identifier | t.ThisExpression =
             scope.maybeGenerateMemoised(right, true);
+          if (
+            !array &&
+            t.isIdentifier(right) &&
+            path.get("body").scope.hasOwnBinding(right.name)
+          ) {
+            array = scope.generateUidIdentifier("arr");
+          }
 
           const inits = [t.variableDeclarator(i, t.numericLiteral(0))];
           if (array) {
@@ -150,7 +164,7 @@ export default declare((api, options: Options) => {
     }
   `;
 
-  const builder = skipteratorClosing
+  const builder = skipIteratorClosing
     ? {
         build: buildForOfNoIteratorClosing,
         helper: "createForOfIteratorHelperLoose",
@@ -217,10 +231,12 @@ export default declare((api, options: Options) => {
           return;
         }
 
-        if (!state.availableHelper(builder.helper)) {
-          // Babel <7.9.0 doesn't support this helper
-          transformWithoutHelper(skipteratorClosing, path, state);
-          return;
+        if (!process.env.BABEL_8_BREAKING) {
+          if (!state.availableHelper(builder.helper)) {
+            // Babel <7.9.0 doesn't support this helper
+            transformWithoutHelper(skipIteratorClosing, path, state);
+            return;
+          }
         }
 
         const { node, parent, scope } = path;
@@ -266,7 +282,7 @@ export default declare((api, options: Options) => {
 
           path.parentPath.replaceWithMultiple(nodes);
 
-          // The parent has been replaced, prevent Babel from traversing a detatched path
+          // The parent has been replaced, prevent Babel from traversing a detached path
           path.skip();
         } else {
           path.replaceWithMultiple(nodes);

@@ -5,7 +5,7 @@ import generateCode from "@babel/generator";
 import type { NodePath } from "@babel/traverse";
 
 export default declare(api => {
-  api.assertVersion(7);
+  api.assertVersion(REQUIRED_VERSION(7));
 
   function commentFromString(comment: string | t.Comment): t.Comment {
     return typeof comment === "string"
@@ -143,9 +143,9 @@ export default declare(api => {
       AssignmentPattern: {
         exit({ node }) {
           const { left } = node;
-          // @ts-expect-error optional is not in ObjectPattern
+          // @ts-expect-error optional is not in TSAsExpression
           if (left.optional) {
-            // @ts-expect-error optional is not in ObjectPattern
+            // @ts-expect-error optional is not in TSAsExpression
             left.optional = false;
           }
         },
@@ -238,7 +238,6 @@ export default declare(api => {
             ofPath: path.get("typeAnnotation"),
             toPath: path,
             optional:
-              // @ts-expect-error optional is not in ObjectPattern
               node.optional ||
               // @ts-expect-error Fixme: optional is not in t.TypeAnnotation
               node.typeAnnotation.optional,
@@ -256,7 +255,7 @@ export default declare(api => {
 
       Class(path) {
         const { node } = path;
-        let comments = [];
+        let comments: [string?, ...(string | t.Comment)[]] = [];
         if (node.typeParameters) {
           const typeParameters = path.get("typeParameters");
           comments.push(

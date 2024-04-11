@@ -8,11 +8,10 @@ import {
   supportsESM,
 } from "./helpers/esm.js";
 
-const nodeGte8 = (...args) => {
-  // "minNodeVersion": "8.0.0" <-- For Ctrl+F when dropping node 6
-  const testFn = process.version.slice(0, 3) === "v6." ? it.skip : it;
-  testFn(...args);
-};
+import { itGte, itESM } from "$repo-utils";
+
+// "minNodeVersion": "8.0.0" <-- For Ctrl+F when dropping node 6
+const nodeGte8 = itGte("8.0.0");
 
 describe("asynchronicity", () => {
   const base = path.join(
@@ -114,6 +113,14 @@ describe("asynchronicity", () => {
             ` handle your caching logic."`,
         );
       });
+    });
+
+    itESM("mjs configuring cache", async () => {
+      process.chdir("config-file-mjs-cache");
+
+      const { code } = await babel.transformAsync("");
+
+      expect(code).toBe(`"success"`);
     });
   });
 
@@ -297,6 +304,26 @@ describe("asynchronicity", () => {
           `Unexpected falsy value: undefined`,
         );
       });
+    });
+  });
+
+  describe("misc", () => {
+    it("unknown preset in config file does not trigget unhandledRejection if caught", async () => {
+      process.chdir("unknown-preset");
+      const handler = jest.fn();
+
+      process.addListener("unhandledRejection", handler);
+
+      await babel.loadPartialConfigAsync().catch(() => {});
+
+      // unhandledRejection is triggered at the end of the current microtask
+      // queue. Wait for the event loop to spin to make sure that, if it were to
+      // be triggered, it would have already happened.
+      await new Promise(r => setTimeout(r, 0));
+
+      process.removeListener("unhandledRejection", handler);
+
+      expect(handler).not.toHaveBeenCalled();
     });
   });
 });

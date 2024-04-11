@@ -1,13 +1,16 @@
-import { parse } from "@babel/parser";
+import { parse, parseExpression } from "@babel/parser";
 import * as t from "@babel/types";
 import fs from "fs";
 import path from "path";
 import fixtures from "@babel/helper-fixtures";
 import { TraceMap, originalPositionFor } from "@jridgewell/trace-mapping";
-import { fileURLToPath } from "url";
+import { commonJS, describeBabel7NoESM } from "$repo-utils";
+import { encode } from "@jridgewell/sourcemap-codec";
 
-import _generate, { CodeGenerator } from "../lib/index.js";
+import _generate from "../lib/index.js";
 const generate = _generate.default || _generate;
+
+const { __dirname, require } = commonJS(import.meta.url);
 
 describe("generation", function () {
   it("multiple sources", function () {
@@ -39,7 +42,8 @@ describe("generation", function () {
     expect(generated.map).toMatchInlineSnapshot(`
       Object {
         "file": undefined,
-        "mappings": "AAAA,SAASA,EAAE,CAAEC,GAAG,EAAE;EAAEC,OAAO,CAACC,GAAG,CAACF,GAAG,CAAC;AAAE;ACAtCD,EAAE,CAAC,OAAO,CAAC",
+        "ignoreList": Array [],
+        "mappings": "AAAA,SAASA,EAAEA,CAAEC,GAAG,EAAE;EAAEC,OAAO,CAACC,GAAG,CAACF,GAAG,CAAC;AAAE;ACAtCD,EAAE,CAAC,OAAO,CAAC",
         "names": Array [
           "hi",
           "msg",
@@ -92,7 +96,7 @@ describe("generation", function () {
             "column": 11,
             "line": 1,
           },
-          "name": undefined,
+          "name": "hi",
           "original": Object {
             "column": 11,
             "line": 1,
@@ -323,66 +327,223 @@ describe("generation", function () {
       code,
     );
 
-    expect(generated.map).toEqual(
-      {
-        version: 3,
-        sources: ["inline"],
-        names: ["foo", "bar"],
-        mappings: "AAAA,SAASA,IAAG,GAAG;EAAEC,IAAG;AAAE",
-        sourcesContent: ["function foo() { bar; }\n"],
-      },
-      "sourcemap was incorrectly generated",
-    );
-
-    expect(generated.rawMappings).toEqual(
-      [
-        {
-          name: undefined,
-          generated: { line: 1, column: 0 },
-          source: "inline",
-          original: { line: 1, column: 0 },
+    expect(generated).toMatchInlineSnapshot(`
+      Object {
+        "__mergedMap": Object {
+          "file": undefined,
+          "ignoreList": Array [],
+          "mappings": "AAAA,SAASA,IAAGA,CAAA,EAAG;EAAEC,IAAG;AAAE",
+          "names": Array [
+            "foo",
+            "bar",
+          ],
+          "sourceRoot": undefined,
+          "sources": Array [
+            "inline",
+          ],
+          "sourcesContent": Array [
+            "function foo() { bar; }
+      ",
+          ],
+          "version": 3,
         },
-        {
-          name: "foo",
-          generated: { line: 1, column: 9 },
-          source: "inline",
-          original: { line: 1, column: 9 },
+        "code": "function foo2() {
+        bar2;
+      }",
+        "decodedMap": Object {
+          "file": undefined,
+          "ignoreList": Array [],
+          "mappings": Array [
+            Array [
+              Array [
+                0,
+                0,
+                0,
+                0,
+              ],
+              Array [
+                9,
+                0,
+                0,
+                9,
+                0,
+              ],
+              Array [
+                13,
+                0,
+                0,
+                12,
+                0,
+              ],
+              Array [
+                14,
+                0,
+                0,
+                12,
+              ],
+              Array [
+                16,
+                0,
+                0,
+                15,
+              ],
+            ],
+            Array [
+              Array [
+                2,
+                0,
+                0,
+                17,
+                1,
+              ],
+              Array [
+                6,
+                0,
+                0,
+                20,
+              ],
+            ],
+            Array [
+              Array [
+                0,
+                0,
+                0,
+                22,
+              ],
+            ],
+          ],
+          "names": Array [
+            "foo",
+            "bar",
+          ],
+          "sourceRoot": undefined,
+          "sources": Array [
+            "inline",
+          ],
+          "sourcesContent": Array [
+            "function foo() { bar; }
+      ",
+          ],
+          "version": 3,
         },
-        {
-          name: undefined,
-          generated: { line: 1, column: 13 },
-          source: "inline",
-          original: { line: 1, column: 12 },
+        "map": Object {
+          "file": undefined,
+          "ignoreList": Array [],
+          "mappings": "AAAA,SAASA,IAAGA,CAAA,EAAG;EAAEC,IAAG;AAAE",
+          "names": Array [
+            "foo",
+            "bar",
+          ],
+          "sourceRoot": undefined,
+          "sources": Array [
+            "inline",
+          ],
+          "sourcesContent": Array [
+            "function foo() { bar; }
+      ",
+          ],
+          "version": 3,
         },
-        {
-          name: undefined,
-          generated: { line: 1, column: 16 },
-          source: "inline",
-          original: { line: 1, column: 15 },
-        },
-        {
-          name: "bar",
-          generated: { line: 2, column: 2 },
-          source: "inline",
-          original: { line: 1, column: 17 },
-        },
-        {
-          name: undefined,
-          generated: { line: 2, column: 6 },
-          source: "inline",
-          original: { line: 1, column: 20 },
-        },
-        {
-          name: undefined,
-          generated: { line: 3, column: 0 },
-          source: "inline",
-          original: { line: 1, column: 22 },
-        },
-      ],
-      "raw mappings were incorrectly generated",
-    );
-
-    expect(generated.code).toBe("function foo2() {\n  bar2;\n}");
+        "rawMappings": Array [
+          Object {
+            "generated": Object {
+              "column": 0,
+              "line": 1,
+            },
+            "name": undefined,
+            "original": Object {
+              "column": 0,
+              "line": 1,
+            },
+            "source": "inline",
+          },
+          Object {
+            "generated": Object {
+              "column": 9,
+              "line": 1,
+            },
+            "name": "foo",
+            "original": Object {
+              "column": 9,
+              "line": 1,
+            },
+            "source": "inline",
+          },
+          Object {
+            "generated": Object {
+              "column": 13,
+              "line": 1,
+            },
+            "name": "foo",
+            "original": Object {
+              "column": 12,
+              "line": 1,
+            },
+            "source": "inline",
+          },
+          Object {
+            "generated": Object {
+              "column": 14,
+              "line": 1,
+            },
+            "name": undefined,
+            "original": Object {
+              "column": 12,
+              "line": 1,
+            },
+            "source": "inline",
+          },
+          Object {
+            "generated": Object {
+              "column": 16,
+              "line": 1,
+            },
+            "name": undefined,
+            "original": Object {
+              "column": 15,
+              "line": 1,
+            },
+            "source": "inline",
+          },
+          Object {
+            "generated": Object {
+              "column": 2,
+              "line": 2,
+            },
+            "name": "bar",
+            "original": Object {
+              "column": 17,
+              "line": 1,
+            },
+            "source": "inline",
+          },
+          Object {
+            "generated": Object {
+              "column": 6,
+              "line": 2,
+            },
+            "name": undefined,
+            "original": Object {
+              "column": 20,
+              "line": 1,
+            },
+            "source": "inline",
+          },
+          Object {
+            "generated": Object {
+              "column": 0,
+              "line": 3,
+            },
+            "name": undefined,
+            "original": Object {
+              "column": 22,
+              "line": 1,
+            },
+            "source": "inline",
+          },
+        ],
+      }
+    `);
   });
 
   it("newline in template literal", () => {
@@ -726,6 +887,96 @@ describe("generation", function () {
       });"
     `);
   });
+
+  it("inputSourceMap without sourcesContent", () => {
+    const ast = parse("var t = x => x * x;");
+
+    expect(
+      generate(ast, {
+        sourceMaps: true,
+        inputSourceMap: {
+          version: 3,
+          names: ["t", "x"],
+          sources: ["source-maps/arrow-function/input.js"],
+          mappings:
+            "AAAA,IAAIA,CAAC,GAAG,SAAJA,CAACA,CAAGC,CAAC;EAAA,OAAIA,CAAC,GAAGA,CAAC;AAAA",
+        },
+      }).map,
+    ).toMatchInlineSnapshot(`
+      Object {
+        "file": undefined,
+        "ignoreList": Array [],
+        "mappings": "AAAA,IAAIA,CAAC,GAAGC,CAAA,IAAAA,CAAA,GAAJA,CAAC",
+        "names": Array [
+          "t",
+          "x",
+        ],
+        "sourceRoot": undefined,
+        "sources": Array [
+          "source-maps/arrow-function/input.js",
+        ],
+        "sourcesContent": Array [
+          undefined,
+        ],
+        "version": 3,
+      }
+    `);
+  });
+
+  it("should not throw when loc.column === 0 with inputSourceMap", () => {
+    const ast = parseExpression("a(\n)");
+
+    ast.loc.end.column = 0;
+
+    expect(
+      generate(ast, {
+        sourceMaps: true,
+        inputSourceMap: {
+          version: 3,
+          names: [],
+          sources: ["input.js"],
+          // [ generatedCodeColumn, sourceIndex, sourceCodeLine, sourceCodeColumn, nameIndex ]
+          mappings: encode([[0, 0, 1, 0]]),
+        },
+      }).rawMappings,
+    ).toMatchInlineSnapshot(`
+      Array [
+        Object {
+          "generated": Object {
+            "column": 0,
+            "line": 1,
+          },
+          "name": "a",
+          "original": Object {
+            "column": 0,
+            "line": 1,
+          },
+          "source": "input.js",
+        },
+        Object {
+          "generated": Object {
+            "column": 1,
+            "line": 1,
+          },
+          "name": undefined,
+          "original": Object {
+            "column": 0,
+            "line": 1,
+          },
+          "source": "input.js",
+        },
+        Object {
+          "generated": Object {
+            "column": 2,
+            "line": 1,
+          },
+          "name": undefined,
+          "original": undefined,
+          "source": undefined,
+        },
+      ]
+    `);
+  });
 });
 
 describe("programmatic generation", function () {
@@ -857,6 +1108,28 @@ describe("programmatic generation", function () {
     );
     const output = generate(functionTypeAnnotation).code;
     expect(output).toBe("() => void");
+  });
+
+  it("generate a child node with retainLines", () => {
+    const node = parse("a;\n\nexpect(a).toMatchInlineSnapshot(`[1, 2]`\n);")
+      .program.body[1].expression;
+
+    expect(node.type).toBe("CallExpression");
+
+    expect(generate(node, { retainLines: true }).code).toMatchInlineSnapshot(`
+      "
+
+      expect(a).toMatchInlineSnapshot(\`[1, 2]\`
+      )"
+    `);
+
+    node.loc.end.line = node.loc.start.line;
+
+    expect(generate(node, { retainLines: true }).code).toMatchInlineSnapshot(`
+      "
+
+      expect(a).toMatchInlineSnapshot(\`[1, 2]\`)"
+    `);
   });
 
   describe("directives", function () {
@@ -1197,37 +1470,133 @@ describe("programmatic generation", function () {
         line*/"
       `);
     });
+  });
 
-    it("comment in arrow function with return type", () => {
-      const arrow = t.arrowFunctionExpression(
-        [t.identifier("x"), t.identifier("y")],
-        t.identifier("z"),
-      );
-      arrow.returnType = t.tsTypeAnnotation(t.tsAnyKeyword());
-      arrow.returnType.trailingComments = [
-        { type: "CommentBlock", value: "foo" },
-        // This comment is dropped. There is no way to safely print it
-        // as a trailingComment of the return type.
-        { type: "CommentBlock", value: "new\nline" },
-      ];
-      expect(generate(arrow).code).toMatchInlineSnapshot(
-        `"(x, y): any /*foo*/ => z"`,
-      );
-    });
+  it("comment in arrow function with return type", () => {
+    const arrow = t.arrowFunctionExpression(
+      [t.identifier("x"), t.identifier("y")],
+      t.identifier("z"),
+    );
+    arrow.returnType = t.tsTypeAnnotation(t.tsAnyKeyword());
+    arrow.returnType.trailingComments = [
+      { type: "CommentBlock", value: "foo" },
+      // This comment is dropped. There is no way to safely print it
+      // as a trailingComment of the return type.
+      { type: "CommentBlock", value: "new\nline" },
+    ];
+    expect(generate(arrow).code).toMatchInlineSnapshot(
+      `"(x, y): any /*foo*/ => z"`,
+    );
+  });
+
+  it("multi-line leading comment after return", () => {
+    const val = t.identifier("val");
+    val.leadingComments = [{ type: "CommentBlock", value: "new\nline" }];
+    expect(generate(t.returnStatement(val)).code).toMatch(`return (
+  /*new
+  line*/
+  val
+);`);
+  });
+
+  it("multi-line leading comment after return 2", () => {
+    const ast = parse(
+      `return (
+        /*new
+        line*/ val);`,
+      {
+        allowReturnOutsideFunction: true,
+      },
+    );
+    // Remove `parenthesized`
+    ast.program.body[0].argument.extra = null;
+    expect(generate(ast).code).toMatchInlineSnapshot(`
+        "return (
+          /*new
+          line*/
+          val
+        );"
+      `);
+  });
+
+  it("multi-line leading comment after return compact", () => {
+    const val = t.identifier("val");
+    val.leadingComments = [{ type: "CommentBlock", value: "new\nline" }];
+    expect(
+      generate(t.returnStatement(val), {
+        compact: true,
+      }).code,
+    ).toMatchInlineSnapshot(`
+        "return(/*new
+        line*/val);"
+      `);
+  });
+
+  it("multi-line leading comment after return concise", () => {
+    const val = t.identifier("val");
+    val.leadingComments = [{ type: "CommentBlock", value: "new\nline" }];
+    expect(
+      generate(t.returnStatement(val), {
+        concise: true,
+      }).code,
+    ).toMatchInlineSnapshot(`
+        "return (/*new
+        line*/ val );"
+      `);
+  });
+
+  it("correctly indenting when `retainLines`", () => {
+    const ast = parse(
+      `
+export const App = () => {
+  return (
+      /**
+        * First
+        */
+      2
+  );
+};
+
+/**
+  * Second
+  */`,
+      {
+        sourceType: "module",
+      },
+    );
+
+    expect(generate(ast, { retainLines: true }).code).toMatchInlineSnapshot(`
+      "
+      export const App = () => {
+        return (
+          /**
+            * First
+            */
+          2);
+
+      };
+
+      /**
+        * Second
+        */"
+    `);
   });
 });
 
-describe("CodeGenerator", function () {
+describeBabel7NoESM("CodeGenerator", function () {
   it("generate", function () {
+    const CodeGenerator = require("../lib/index.js").CodeGenerator;
     const codeGen = new CodeGenerator(t.numericLiteral(123));
     const code = codeGen.generate().code;
     expect(parse(code).program.body[0].expression.value).toBe(123);
   });
 });
 
-const suites = (fixtures.default || fixtures)(
-  path.join(path.dirname(fileURLToPath(import.meta.url)), "fixtures"),
-);
+const suites = (fixtures.default || fixtures)(path.join(__dirname, "fixtures"));
+
+afterEach(() => {
+  jest.restoreAllMocks();
+});
 
 suites.forEach(function (testSuite) {
   describe("generation/" + testSuite.title, function () {
@@ -1253,10 +1622,7 @@ suites.forEach(function (testSuite) {
             };
             const actualAst = parse(actualCode, parserOpts);
             const options = {
-              sourceFileName: path.relative(
-                path.dirname(fileURLToPath(import.meta.url)),
-                actual.loc,
-              ),
+              sourceFileName: path.relative(__dirname, actual.loc),
               ...task.options,
               sourceMaps: task.sourceMap ? true : task.options.sourceMaps,
             };
@@ -1271,7 +1637,20 @@ suites.forEach(function (testSuite) {
                 throwMsg === true ? undefined : throwMsg,
               );
             } else {
+              jest.spyOn(console, "warn").mockImplementation(() => {});
+
               const result = run();
+
+              if (
+                options.warns &&
+                (!process.env.IS_PUBLISH || !options.noWarnInPublishBuild)
+              ) {
+                expect(console.warn).toHaveBeenCalledWith(
+                  expect.stringContaining(options.warns),
+                );
+              } else {
+                expect(console.warn).not.toHaveBeenCalled();
+              }
 
               if (options.sourceMaps) {
                 try {

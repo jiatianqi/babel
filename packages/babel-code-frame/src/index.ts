@@ -1,6 +1,26 @@
-import highlight, { shouldHighlight, getChalk } from "@babel/highlight";
+import highlight, { shouldHighlight } from "@babel/highlight";
 
-type Chalk = ReturnType<typeof getChalk>;
+import _colors, { createColors } from "picocolors";
+import type { Colors, Formatter } from "picocolors/types";
+// See https://github.com/alexeyraspopov/picocolors/issues/62
+const colors =
+  typeof process === "object" &&
+  (process.env.FORCE_COLOR === "0" || process.env.FORCE_COLOR === "false")
+    ? createColors(false)
+    : _colors;
+
+const compose: <T, U, V>(f: (gv: U) => V, g: (v: T) => U) => (v: T) => V =
+  (f, g) => v =>
+    f(g(v));
+
+let pcWithForcedColor: Colors = undefined;
+function getColors(forceColor: boolean) {
+  if (forceColor) {
+    pcWithForcedColor ??= createColors(true);
+    return pcWithForcedColor;
+  }
+  return colors;
+}
 
 let deprecationWarningShown = false;
 
@@ -37,13 +57,13 @@ export interface Options {
 }
 
 /**
- * Chalk styles for code frame token types.
+ * Styles for code frame token types.
  */
-function getDefs(chalk: Chalk) {
+function getDefs(colors: Colors) {
   return {
-    gutter: chalk.grey,
-    marker: chalk.red.bold,
-    message: chalk.red.bold,
+    gutter: colors.gray,
+    marker: compose(colors.red, colors.bold),
+    message: compose(colors.red, colors.bold),
   };
 }
 
@@ -137,10 +157,10 @@ export function codeFrameColumns(
 ): string {
   const highlighted =
     (opts.highlightCode || opts.forceColor) && shouldHighlight(opts);
-  const chalk = getChalk(opts);
-  const defs = getDefs(chalk);
-  const maybeHighlight = (chalkFn: Chalk, string: string) => {
-    return highlighted ? chalkFn(string) : string;
+  const colors = getColors(opts.forceColor);
+  const defs = getDefs(colors);
+  const maybeHighlight = (fmt: Formatter, string: string) => {
+    return highlighted ? fmt(string) : string;
   };
   const lines = rawLines.split(NEWLINE);
   const { start, end, markerLines } = getMarkerLines(loc, lines, opts);
@@ -198,7 +218,7 @@ export function codeFrameColumns(
   }
 
   if (highlighted) {
-    return chalk.reset(frame);
+    return colors.reset(frame);
   } else {
     return frame;
   }

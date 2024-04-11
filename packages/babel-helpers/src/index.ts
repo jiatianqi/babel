@@ -9,7 +9,7 @@ import {
   identifier,
 } from "@babel/types";
 import type * as t from "@babel/types";
-import helpers from "./helpers";
+import helpers from "./helpers.ts";
 
 function makePath(path: NodePath) {
   const parts = [];
@@ -110,7 +110,9 @@ function getHelperMetadata(file: File): HelperMetadata {
       const name = child.node.name;
       const binding = child.scope.getBinding(name);
       if (!binding) {
-        globals.add(name);
+        if (name !== "arguments" || child.scope.path.isProgram()) {
+          globals.add(name);
+        }
       } else if (dependencies.has(binding.identifier)) {
         importBindingsReferences.push(makePath(child));
       }
@@ -191,6 +193,7 @@ function permuteHelperAST(
 
   const toRename: Record<string, string> = {};
   const bindings = new Set(localBindings || []);
+  if (id.type === "Identifier") bindings.add(id.name);
   localBindingNames.forEach(name => {
     let newName = name;
     while (bindings.has(newName)) newName = "_" + newName;
@@ -291,7 +294,7 @@ function loadHelper(name: string) {
 
     // We compute the helper metadata lazily, so that we skip that
     // work if we only need the `.minVersion` (for example because
-    // of a call to `.availableHelper` when `@babel/rutime`).
+    // of a call to `.availableHelper` when `@babel/runtime`).
     let metadata: HelperMetadata | null = null;
 
     helperData[name] = {

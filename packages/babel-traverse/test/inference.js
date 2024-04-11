@@ -303,7 +303,7 @@ describe("inference with Flow", function () {
       const type = path.getTypeAnnotation();
       expect(t.isAnyTypeAnnotation(type)).toBeTruthy();
     });
-    it("should not cause a stack overflow when two variable depend on eachother", function () {
+    it("should not cause a stack overflow when two variable depend on each other", function () {
       const path = flowGetPath(`
         var b, c;
         while (0) {
@@ -648,7 +648,7 @@ describe("inference with TypeScript", function () {
       const type = path.getTypeAnnotation();
       expect(t.isAnyTypeAnnotation(type)).toBeTruthy();
     });
-    it("should not cause a stack overflow when two variable depend on eachother", function () {
+    it("should not cause a stack overflow when two variable depend on each other", function () {
       const path = tsGetPath(`
         var b, c;
         while (0) {
@@ -700,6 +700,13 @@ describe("inference with TypeScript", function () {
     ])(`NodePath(%p).isGenericType("Array") should be true`, input => {
       const path = tsGetPath(input).get("body.0.expression");
       expect(path.isGenericType("Array")).toBe(true);
+    });
+    it("should not throw both flow and ts types", () => {
+      const path = tsGetPath(
+        `const bar = 0 ? mkList() : [];function mkList(): any[] {return [];}`,
+      ).get("body.0.declarations.0");
+      // TODO: This should be true
+      expect(path.isGenericType("Array")).toBe(false);
     });
   });
 });

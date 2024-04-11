@@ -1,13 +1,13 @@
 import * as charCodes from "charcodes";
 
-import { tokenLabelName, tt } from "../tokenizer/types";
-import type Parser from "../parser";
-import type * as N from "../types";
-import { ParseErrorEnum } from "../parse-error";
-import type { Undone } from "../parser/node";
-import type { ExpressionErrors } from "../parser/util";
-import type { BindingTypes } from "../util/scopeflags";
-import type { Position } from "../util/location";
+import { tokenLabelName, tt } from "../tokenizer/types.ts";
+import type Parser from "../parser/index.ts";
+import type * as N from "../types.ts";
+import { ParseErrorEnum } from "../parse-error.ts";
+import type { Undone } from "../parser/node.ts";
+import type { ExpressionErrors } from "../parser/util.ts";
+import type { BindingFlag } from "../util/scopeflags.ts";
+import type { Position } from "../util/location.ts";
 
 type PossiblePlaceholders = {
   Identifier: N.Identifier;
@@ -43,7 +43,7 @@ export default (superClass: typeof Parser) =>
       expectedNode: T,
     ): /*?N.Placeholder<T>*/ MaybePlaceholder<T> | undefined | null {
       if (this.match(tt.placeholder)) {
-        const node = this.startNode();
+        const node = this.startNode<N.Placeholder<T>>();
         this.next();
         this.assertNoSpace();
 
@@ -78,10 +78,10 @@ export default (superClass: typeof Parser) =>
         code === charCodes.percentSign &&
         this.input.charCodeAt(this.state.pos + 1) === charCodes.percentSign
       ) {
-        return this.finishOp(tt.placeholder, 2);
+        this.finishOp(tt.placeholder, 2);
+      } else {
+        super.getTokenFromCode(code);
       }
-
-      return super.getTokenFromCode(code);
     }
 
     /* ============================================================ *
@@ -129,7 +129,7 @@ export default (superClass: typeof Parser) =>
       return this.parsePlaceholder("Pattern") || super.parseBindingAtom();
     }
 
-    isValidLVal(type: string, isParenthesized: boolean, binding: BindingTypes) {
+    isValidLVal(type: string, isParenthesized: boolean, binding: BindingFlag) {
       return (
         type === "Placeholder" ||
         super.isValidLVal(type, isParenthesized, binding)
@@ -181,10 +181,7 @@ export default (superClass: typeof Parser) =>
       node: MaybePlaceholder<"Statement">,
       expr: N.Expression,
     ): MaybePlaceholder<"Statement"> {
-      if (
-        expr.type !== "Placeholder" ||
-        (expr.extra && expr.extra.parenthesized)
-      ) {
+      if (expr.type !== "Placeholder" || expr.extra?.parenthesized) {
         // @ts-expect-error placeholder typings
         return super.parseExpressionStatement(node, expr);
       }
@@ -194,7 +191,7 @@ export default (superClass: typeof Parser) =>
         const stmt: N.LabeledStatement = node;
         stmt.label = this.finishPlaceholder(expr, "Identifier");
         this.next();
-        stmt.body = super.parseStatementOrFunctionDeclaration(false);
+        stmt.body = super.parseStatementOrSloppyAnnexBFunctionDeclaration();
         return this.finishNode(stmt, "LabeledStatement");
       }
 
@@ -249,9 +246,10 @@ export default (superClass: typeof Parser) =>
           node.body = this.finishPlaceholder(placeholder, "ClassBody");
           return this.finishNode(node, type);
         } else {
-          throw this.raise(PlaceholderErrors.ClassNameIsRequired, {
-            at: this.state.startLoc,
-          });
+          throw this.raise(
+            PlaceholderErrors.ClassNameIsRequired,
+            this.state.startLoc,
+          );
         }
       } else {
         this.parseClassId(node, isStatement, optionalId);
@@ -278,7 +276,7 @@ export default (superClass: typeof Parser) =>
 
       // export %%NAME%% from "foo";
       this.expectPlugin("exportDefaultFrom");
-      const specifier = this.startNode();
+      const specifier = this.startNode<N.ExportDefaultSpecifier>();
       specifier.exported = placeholder;
       node.specifiers = [this.finishNode(specifier, "ExportDefaultSpecifier")];
 
@@ -302,12 +300,22 @@ export default (superClass: typeof Parser) =>
       return super.isExportDefaultSpecifier();
     }
 
-    maybeParseExportDefaultSpecifier(node: N.Node): boolean {
-      if (node.specifiers && node.specifiers.length > 0) {
+    maybeParseExportDefaultSpecifier(
+      node: Undone<
+        | N.ExportDefaultDeclaration
+        | N.ExportAllDeclaration
+        | N.ExportNamedDeclaration
+      >,
+      maybeDefaultIdentifier: N.Identifier | null,
+    ): node is Undone<N.ExportNamedDeclaration> {
+      if ((node as N.ExportNamedDeclaration).specifiers?.length) {
         // "export %%NAME%%" has already been parsed by #parseExport.
         return true;
       }
-      return super.maybeParseExportDefaultSpecifier(node);
+      return super.maybeParseExportDefaultSpecifier(
+        node,
+        maybeDefaultIdentifier,
+      );
     }
 
     checkExport(node: N.ExportNamedDeclaration): void {
@@ -370,9 +378,7 @@ export default (superClass: typeof Parser) =>
     // Throws if the current token and the prev one are separated by a space.
     assertNoSpace(): void {
       if (this.state.start > this.state.lastTokEndLoc.index) {
-        this.raise(PlaceholderErrors.UnexpectedSpace, {
-          at: this.state.lastTokEndLoc,
-        });
+        this.raise(PlaceholderErrors.UnexpectedSpace, this.state.lastTokEndLoc);
       }
     }
   };

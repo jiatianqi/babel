@@ -3,7 +3,7 @@ import helper from "@babel/helper-builder-react-jsx";
 import { types as t } from "@babel/core";
 
 export default declare(api => {
-  api.assertVersion(7);
+  api.assertVersion(REQUIRED_VERSION(7));
 
   function hasRefOrSpread(attrs: t.JSXOpeningElement["attributes"]) {
     for (let i = 0; i < attrs.length; i++) {
@@ -47,7 +47,7 @@ export default declare(api => {
       let hasKey = false;
       if (t.isObjectExpression(props)) {
         const keyIndex = props.properties.findIndex(prop =>
-          // @ts-expect-error todo(flow->ts) key does not exist on SpeadElement
+          // @ts-expect-error todo(flow->ts) key does not exist on SpreadElement
           t.isIdentifier(prop.key, { name: "key" }),
         );
         if (keyIndex > -1) {

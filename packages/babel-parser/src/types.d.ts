@@ -1,8 +1,8 @@
-import type { SourceType } from "./options";
-import type { Token } from "./tokenizer";
-import type { SourceLocation } from "./util/location";
-import type { PlaceholderTypes } from "./plugins/placeholders";
-import type { ParseError } from "./parse-error";
+import type { SourceType } from "./options.ts";
+import type { Token } from "./tokenizer/index.ts";
+import type { SourceLocation } from "./util/location.ts";
+import type { PlaceholderTypes } from "./plugins/placeholders.ts";
+import type { ParseError } from "./parse-error.ts";
 
 /*
  * If making any changes to the AST, update:
@@ -46,11 +46,11 @@ export interface NodeBase {
   start: number;
   end: number;
   loc: SourceLocation;
-  range: [number, number];
+  range?: [number, number];
   leadingComments?: Array<Comment>;
   trailingComments?: Array<Comment>;
   innerComments?: Array<Comment>;
-  extra: {
+  extra?: {
     [key: string]: any;
   };
 }
@@ -355,7 +355,7 @@ export interface FunctionDeclaration extends OptFunctionDeclaration {
 export interface VariableDeclaration extends DeclarationBase, HasDecorators {
   type: "VariableDeclaration";
   declarations: VariableDeclarator[];
-  kind: "var" | "let" | "const" | "using";
+  kind: "var" | "let" | "const" | "using" | "await using";
 }
 
 export interface VariableDeclarator extends NodeBase {
@@ -597,8 +597,8 @@ export interface OptionalCallExpression extends CallOrNewBase {
 }
 export interface BindExpression extends NodeBase {
   type: "BindExpression";
-  object: Array<Expression | undefined | null>;
-  callee: Expression[];
+  object: Expression | undefined | null;
+  callee: Expression;
 }
 
 export interface ConditionalExpression extends NodeBase {
@@ -622,6 +622,13 @@ export interface CallExpression extends CallOrNewBase {
 export interface NewExpression extends CallOrNewBase {
   type: "NewExpression";
   optional?: boolean; // TODO: Not in spec
+}
+
+export interface ImportExpression extends NodeBase {
+  type: "ImportExpression";
+  source: Expression;
+  phase?: null | "source" | "defer";
+  options: Expression | null;
 }
 
 export interface SequenceExpression extends NodeBase {
@@ -921,6 +928,9 @@ export interface ImportDeclaration extends NodeBase {
   >;
   source: Literal;
   importKind?: "type" | "typeof" | "value"; // TODO: Not in spec,
+  phase?: null | "source" | "defer";
+  attributes?: ImportAttribute[];
+  // @deprecated
   assertions?: ImportAttribute[];
   module?: boolean;
 }
@@ -944,9 +954,13 @@ export interface ImportNamespaceSpecifier extends ModuleSpecifier {
 export interface ExportNamedDeclaration extends NodeBase {
   type: "ExportNamedDeclaration";
   declaration: Declaration | undefined | null;
-  specifiers: Array<ExportSpecifier | ExportDefaultSpecifier>;
+  specifiers: Array<
+    ExportSpecifier | ExportDefaultSpecifier | ExportNamespaceSpecifier
+  >;
   source: Literal | undefined | null;
   exportKind?: "type" | "value"; // TODO: Not in spec,
+  attributes?: ImportAttribute[];
+  // @deprecated
   assertions?: ImportAttribute[];
 }
 
@@ -960,6 +974,11 @@ export interface ExportSpecifier extends NodeBase {
 export interface ExportDefaultSpecifier extends NodeBase {
   type: "ExportDefaultSpecifier";
   exported: Identifier;
+}
+
+export interface ExportNamespaceSpecifier extends NodeBase {
+  type: "ExportNamespaceSpecifier";
+  exported: Identifier | StringLiteral;
 }
 
 export interface ExportDefaultDeclaration extends NodeBase {
@@ -997,6 +1016,7 @@ export type JSXEmptyExpression = Node;
 export type JSXSpreadChild = Node;
 export type JSXExpressionContainer = Node;
 export type JSXAttribute = Node;
+export type JSXSpreadAttribute = Node;
 export interface JSXOpeningElement extends NodeBase {
   type: "JSXOpeningElement";
   name: JSXNamespacedName | JSXMemberExpression;
@@ -1049,10 +1069,11 @@ export interface TypeParameter extends NodeBase {
 
 export interface TsTypeParameter extends NodeBase {
   type: "TSTypeParameter";
-  // TODO(Babel-8): remove string type support
+  // TODO(Babel 8): remove string type support
   name: string | Identifier;
   in?: boolean;
   out?: boolean;
+  const?: boolean;
   constraint?: TsType;
   default?: TsType;
 }
@@ -1208,6 +1229,10 @@ export interface EstreeMethodDefinition extends NodeBase {
 export interface EstreeImportExpression extends NodeBase {
   type: "ImportExpression";
   source: Expression;
+  options?: Expression | null;
+  /**
+   * @deprecated Use options instead
+   */
   attributes?: Expression | null;
 }
 
@@ -1222,6 +1247,11 @@ export interface EstreePropertyDefinition extends NodeBase {
   key: Expression | EstreePrivateIdentifier;
   computed: boolean;
   value: Expression;
+}
+
+export interface EstreeChainExpression extends NodeBase {
+  type: "ChainExpression";
+  expression: Expression;
 }
 
 // === === === ===
@@ -1286,7 +1316,7 @@ export interface TsSignatureDeclarationOrIndexSignatureBase extends NodeBase {
   // Not using TypeScript's "ParameterDeclaration" here, since it's inconsistent with regular functions.
   params: Array<Identifier | RestElement | ObjectPattern | ArrayPattern>;
   returnType: TsTypeAnnotation | undefined | null;
-  // TODO(Babel-8): Remove
+  // TODO(Babel 8): Remove
   parameters: Array<Identifier | RestElement | ObjectPattern | ArrayPattern>;
   typeAnnotation: TsTypeAnnotation | undefined | null;
 }
@@ -1328,7 +1358,6 @@ export interface TsPropertySignature extends TsNamedTypeElementBase {
   type: "TSPropertySignature";
   readonly?: true;
   typeAnnotation?: TsTypeAnnotation;
-  initializer?: Expression;
 }
 
 export interface TsMethodSignature
@@ -1527,6 +1556,7 @@ export interface TsImportType extends TsTypeBase {
   argument: StringLiteral;
   qualifier?: TsEntityName;
   typeParameters?: TsTypeParameterInstantiation;
+  options?: Expression | null;
 }
 
 // ================
@@ -1662,7 +1692,7 @@ export interface TsInstantiationExpression extends NodeBase {
 export interface Placeholder<N extends PlaceholderTypes = PlaceholderTypes>
   extends NodeBase {
   type: "Placeholder";
-  id: Identifier;
+  name: Identifier;
   expectedNode: N;
 }
 

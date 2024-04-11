@@ -3,10 +3,9 @@ import environmentVisitor from "@babel/helper-environment-visitor";
 import memberExpressionToFunctions from "@babel/helper-member-expression-to-functions";
 import type { HandlerState } from "@babel/helper-member-expression-to-functions";
 import optimiseCall from "@babel/helper-optimise-call-expression";
-import template from "@babel/template";
-import traverse from "@babel/traverse";
+import { traverse, template, types as t } from "@babel/core";
 import type { NodePath, Scope } from "@babel/traverse";
-import {
+const {
   assignmentExpression,
   booleanLiteral,
   callExpression,
@@ -16,21 +15,22 @@ import {
   sequenceExpression,
   stringLiteral,
   thisExpression,
-} from "@babel/types";
-import type * as t from "@babel/types";
+} = t;
 
-// TODO (Babel 8): Don't export this.
-export {
-  default as environmentVisitor,
-  skipAllButComputedKey,
-} from "@babel/helper-environment-visitor";
+if (!process.env.BABEL_8_BREAKING && !USE_ESM && !IS_STANDALONE) {
+  // eslint-disable-next-line no-restricted-globals
+  const ns = require("@babel/helper-environment-visitor");
+  // eslint-disable-next-line no-restricted-globals
+  exports.environmentVisitor = ns.default;
+  // eslint-disable-next-line no-restricted-globals
+  exports.skipAllButComputedKey = ns.skipAllButComputedKey;
+}
 
-type ThisRef =
-  | {
-      memo: t.AssignmentExpression;
-      this: t.Identifier;
-    }
-  | { this: t.ThisExpression };
+type ThisRef = {
+  needAccessFirst?: boolean;
+  this: t.ThisExpression;
+};
+
 /**
  * Creates an expression which result is the proto of objectRef.
  *
@@ -99,10 +99,10 @@ type SharedState = {
 
 type Handler = HandlerState<SharedState> & SharedState;
 type SuperMember = NodePath<
-  | t.MemberExpression & {
-      object: t.Super;
-      property: Exclude<t.MemberExpression["property"], t.PrivateName>;
-    }
+  t.MemberExpression & {
+    object: t.Super;
+    property: Exclude<t.MemberExpression["property"], t.PrivateName>;
+  }
 >;
 
 interface SpecHandler
@@ -174,21 +174,18 @@ const specHandlers: SpecHandler = {
       this.isPrivateMethod,
     );
     return callExpression(this.file.addHelper("get"), [
-      // @ts-expect-error memo does not exist when this.isDerivedConstructor is false
-      thisRefs.memo ? sequenceExpression([thisRefs.memo, proto]) : proto,
+      thisRefs.needAccessFirst
+        ? sequenceExpression([thisRefs.this, proto])
+        : proto,
       this.prop(superMember),
       thisRefs.this,
     ]);
   },
 
   _getThisRefs(this: Handler & SpecHandler): ThisRef {
-    if (!this.isDerivedConstructor) {
-      return { this: thisExpression() };
-    }
-    const thisRef = this.scope.generateDeclaredUidIdentifier("thisSuper");
     return {
-      memo: assignmentExpression("=", thisRef, thisExpression()),
-      this: cloneNode(thisRef),
+      needAccessFirst: this.isDerivedConstructor,
+      this: thisExpression(),
     };
   },
 
@@ -205,8 +202,9 @@ const specHandlers: SpecHandler = {
       this.isPrivateMethod,
     );
     return callExpression(this.file.addHelper("set"), [
-      // @ts-expect-error memo does not exist when this.isDerivedConstructor is false
-      thisRefs.memo ? sequenceExpression([thisRefs.memo, proto]) : proto,
+      thisRefs.needAccessFirst
+        ? sequenceExpression([thisRefs.this, proto])
+        : proto,
       this.prop(superMember),
       value,
       thisRefs.this,
@@ -418,16 +416,29 @@ export default class ReplaceSupers {
   }
 
   replace() {
+    const { methodPath } = this;
     // https://github.com/babel/babel/issues/11994
     if (this.opts.refToPreserve) {
-      this.methodPath.traverse(unshadowSuperBindingVisitor, {
+      methodPath.traverse(unshadowSuperBindingVisitor, {
         refName: this.opts.refToPreserve.name,
       });
     }
 
     const handler = this.constantSuper ? looseHandlers : specHandlers;
 
-    memberExpressionToFunctions<ReplaceState>(this.methodPath, visitor, {
+    // todo: this should have been handled by the environmentVisitor,
+    // consider add visitSelf support for the path.traverse
+    // @ts-expect-error: Refine typings in packages/babel-traverse/src/types.ts
+    // shouldSkip is accepted in traverseNode
+    visitor.shouldSkip = (path: NodePath) => {
+      if (path.parentPath === methodPath) {
+        if (path.parentKey === "decorators" || path.parentKey === "key") {
+          return true;
+        }
+      }
+    };
+
+    memberExpressionToFunctions<ReplaceState>(methodPath, visitor, {
       file: this.file,
       scope: this.methodPath.scope,
       isDerivedConstructor: this.isDerivedConstructor,

@@ -1,5 +1,6 @@
-import type Printer from "../printer";
+import type Printer from "../printer.ts";
 import type * as t from "@babel/types";
+import type { NodePath } from "@babel/traverse";
 
 export function TSTypeAnnotation(this: Printer, node: t.TSTypeAnnotation) {
   this.token(":");
@@ -73,12 +74,16 @@ export function TSParameterProperty(
   this._param(node.parameter);
 }
 
-export function TSDeclareFunction(this: Printer, node: t.TSDeclareFunction) {
+export function TSDeclareFunction(
+  this: Printer,
+  node: t.TSDeclareFunction,
+  parent: NodePath<t.TSDeclareFunction>["parent"],
+) {
   if (node.declare) {
     this.word("declare");
     this.space();
   }
-  this._functionHead(node);
+  this._functionHead(node, parent);
   this.token(";");
 }
 
@@ -115,19 +120,13 @@ export function TSPropertySignature(
   this: Printer,
   node: t.TSPropertySignature,
 ) {
-  const { readonly, initializer } = node;
+  const { readonly } = node;
   if (readonly) {
     this.word("readonly");
     this.space();
   }
   this.tsPrintPropertyOrMethodName(node);
   this.print(node.typeAnnotation, node);
-  if (initializer) {
-    this.space();
-    this.token("=");
-    this.space();
-    this.print(initializer, node);
-  }
   this.token(";");
 }
 
@@ -312,9 +311,7 @@ function tsPrintBraced(printer: Printer, members: t.Node[], node: t.Node) {
     printer.dedent();
   }
 
-  printer.sourceWithOffset("end", node.loc, 0, -1);
-
-  printer.rightBrace();
+  printer.rightBrace(node);
 }
 
 export function TSArrayType(this: Printer, node: t.TSArrayType) {
@@ -417,7 +414,7 @@ export function TSIndexedAccessType(
 }
 
 export function TSMappedType(this: Printer, node: t.TSMappedType) {
-  const { nameType, optional, readonly, typeParameter } = node;
+  const { nameType, optional, readonly, typeParameter, typeAnnotation } = node;
   this.token("{");
   this.space();
   if (readonly) {
@@ -450,9 +447,12 @@ export function TSMappedType(this: Printer, node: t.TSMappedType) {
     tokenIfPlusMinus(this, optional);
     this.token("?");
   }
-  this.token(":");
-  this.space();
-  this.print(node.typeAnnotation, node);
+
+  if (typeAnnotation) {
+    this.token(":");
+    this.space();
+    this.print(typeAnnotation, node);
+  }
   this.space();
   this.token("}");
 }
